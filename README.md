@@ -21,23 +21,31 @@ A lightweight macOS menu bar app that shows your **Claude** and **Codex** (OpenA
 
 ## Installation
 
-### Homebrew (Recommended)
+### Quick Install (one command)
 
 ```bash
-brew tap betoxf/tap
-brew install --cask justausagebar
+brew install betoxf/tap/justausagebar
 ```
 
-To **update** to the latest version:
+That's it. Homebrew handles the tap automatically.
+
+### Update
 
 ```bash
-brew upgrade --cask justausagebar
+brew upgrade betoxf/tap/justausagebar
 ```
 
-To **uninstall**:
+### Uninstall
 
 ```bash
-brew uninstall --cask justausagebar
+brew uninstall justausagebar
+brew untap betoxf/tap  # optional: remove the tap
+```
+
+### Install Script (alternative)
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/betoxf/JustaUsageBar/main/install.sh)"
 ```
 
 ### Build from Source
@@ -45,10 +53,9 @@ brew uninstall --cask justausagebar
 ```bash
 git clone https://github.com/betoxf/JustaUsageBar.git
 cd JustaUsageBar
-xcodebuild -project JustaUsageBar.xcodeproj -scheme JustaUsageBar -configuration Release build
+make release
+# Built app is at build/Release/JustaUsageBar.app — drag to /Applications
 ```
-
-The built app will be in `~/Library/Developer/Xcode/DerivedData/JustaUsageBar-*/Build/Products/Release/JustaUsageBar.app`. Copy it to `/Applications`.
 
 Or open `JustaUsageBar.xcodeproj` in Xcode and press Cmd+R.
 
@@ -89,9 +96,9 @@ If you don't use the CLI, you can sign in via browser:
 
 ### Menu Bar Display
 
-| Provider | Icon | Style |
-|----------|------|-------|
-| Claude | `*` Claude | Anthropic orange accents |
+| Provider | Label | Style |
+|----------|-------|-------|
+| Claude | `✳︎ Claude` | Anthropic orange accents |
 | Codex | **CODEX** | Heavy font, OpenAI green accents |
 
 When both providers are active, the menu bar alternates between them with a smooth dissolve animation.
@@ -162,6 +169,11 @@ The API might be temporarily unavailable. Click Refresh (Cmd+R) or wait for the 
 ### App not starting at login
 Check System Settings > General > Login Items > ensure JustaUsageBar is listed. You can also toggle it from the app menu.
 
+### Check current version
+```bash
+brew info betoxf/tap/justausagebar
+```
+
 ## Privacy & Security
 
 - All credentials stored locally (AES-256-GCM encrypted, machine-locked)
@@ -176,7 +188,7 @@ Check System Settings > General > Login Items > ensure JustaUsageBar is listed. 
 1. Fork the repo
 2. Create a feature branch
 3. Make your changes
-4. Build and test: `xcodebuild -scheme JustaUsageBar build`
+4. Build and test: `make build`
 5. Open a PR
 
 ## License

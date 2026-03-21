@@ -213,7 +213,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     .font: NSFont.systemFont(ofSize: 12, weight: .heavy),
                     .foregroundColor: NSColor.labelColor
                 ]
-                codexHeader.attributedTitle = NSAttributedString(string: "CODEX", attributes: headerAttrs)
+                codexHeader.attributedTitle = NSAttributedString(string: "Codex", attributes: headerAttrs)
                 menu.addItem(codexHeader)
 
                 let codex = viewModel.codexUsageData
@@ -731,7 +731,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .font: NSFont.systemFont(ofSize: 7.5, weight: .heavy),
                 .foregroundColor: codexBrandColor
             ]
-            let codexLabel = NSAttributedString(string: "CODEX", attributes: codexLabelAttributes)
+            let codexLabel = NSAttributedString(string: "Codex", attributes: codexLabelAttributes)
             let labelX = (width - codexLabel.size().width) / 2
             codexLabel.draw(at: NSPoint(x: labelX, y: 12))
             yOffset = 0

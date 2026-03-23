@@ -1,5 +1,9 @@
 # Just A Usage Bar
 
+<p align="center">
+  <img src="images/image3.png" alt="JustaUsageBar screenshot" width="600">
+</p>
+
 A lightweight macOS menu bar app that shows your **Claude** and **Codex** (OpenAI) usage at a glance -- 5-hour rolling window and 7-day limits, right in your menu bar.
 
 [![Demo Video](https://img.shields.io/badge/Demo-Video-blue)](https://github.com/betoxf/JustaUsageBar/releases/download/v1.1.0/demo.mp4)

@@ -25,8 +25,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var transitionTimer: Timer?
     private var transitionProgress: CGFloat = 0
     private var isTransitioning = false
-    private var codexGradientAnimationTimer: Timer?
-    private var codexGradientOffset: CGFloat = 0
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusItem()
@@ -84,9 +82,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if viewModel.hasCredentials {
             updateStatusImage()
             startProviderAnimation()
-            if viewModel.showCodex {
-                startCodexGradientAnimation()
-            }
         } else {
             showSetupStatus()
         }
@@ -444,9 +439,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // Switch provider immediately (manual mode or auto mode)
                 currentProvider = (currentProvider == .claude) ? .codex : .claude
                 updateStatusImage()
-                if currentProvider == .codex {
-                    startCodexGradientAnimation()
-                }
             } else {
                 // If only one provider, show menu
                 statusItem.menu = menu
@@ -670,8 +662,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         providerSwitchTimer = nil
         transitionTimer?.invalidate()
         transitionTimer = nil
-        codexGradientAnimationTimer?.invalidate()
-        codexGradientAnimationTimer = nil
         isTransitioning = false
         transitionProgress = 0
     }
@@ -680,26 +670,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         stopProviderAnimation()
         if viewModel.hasCredentials {
             startProviderAnimation()
-            if viewModel.showCodex {
-                startCodexGradientAnimation()
-            }
             updateStatusImage()
-        }
-    }
-
-    private func startCodexGradientAnimation() {
-        codexGradientAnimationTimer?.invalidate()
-        codexGradientAnimationTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                guard let self = self,
-                      self.currentProvider == .codex,
-                      !self.isTransitioning else { return }
-                self.codexGradientOffset += 0.01 // Slower increment
-                if self.codexGradientOffset >= 1.0 {
-                    self.codexGradientOffset = 0
-                }
-                self.updateStatusImage()
-            }
         }
     }
 
@@ -931,59 +902,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let textColor = isDarkMode ? NSColor.white : NSColor(white: 0.25, alpha: 1.0)
         let codexBrandColor = isDarkMode ? NSColor.white : NSColor(white: 0.1, alpha: 1.0)
 
-        // Codex blue/purple gradient colors (subtle, darker)
-        let codexBlue = NSColor(red: 0.1, green: 0.2, blue: 0.5, alpha: 1.0) // Darker blue
-        let codexPurple = NSColor(red: 0.3, green: 0.1, blue: 0.5, alpha: 1.0) // Darker purple
-        let codexCyan = NSColor(red: 0.1, green: 0.3, blue: 0.5, alpha: 1.0) // Darker cyan tint
+        // Codex blue color for percentages
+        let codexBlue = NSColor(red: 0.1, green: 0.2, blue: 0.5, alpha: 1.0)
 
         var yOffset: CGFloat = 0
 
         if showIcon {
-            // Draw "Codex" with lighter weight and animated gradient
-            let codexText = "Codex"
-            let letterSpacing: CGFloat = 0.5
+            // Draw icon and "Codex" label (no gradient, just black/white)
+            let iconFont = NSFont.systemFont(ofSize: 6, weight: .regular)
+            let iconString = ">_"
 
-            // Calculate total width for centering
-            let font = NSFont.systemFont(ofSize: 7, weight: .semibold)
-            var totalWidth: CGFloat = 0
-            for char in codexText {
-                let charStr = String(char)
-                let attrs: [NSAttributedString.Key: Any] = [.font: font]
-                let charSize = charStr.size(withAttributes: attrs)
-                totalWidth += charSize.width + letterSpacing
-            }
-            totalWidth -= letterSpacing
+            let iconAttrs: [NSAttributedString.Key: Any] = [
+                .font: iconFont,
+                .foregroundColor: codexBrandColor
+            ]
+            let codexIcon = NSAttributedString(string: iconString, attributes: iconAttrs)
 
-            var currentX = (width - totalWidth) / 2
+            let codexLabelAttrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 7, weight: .semibold),
+                .foregroundColor: codexBrandColor
+            ]
+            let codexLabel = NSAttributedString(string: " Codex", attributes: codexLabelAttrs)
 
-            // Draw each character with gradient color based on position
-            for (index, char) in codexText.enumerated() {
-                let charStr = String(char)
-                let charAttrs: [NSAttributedString.Key: Any] = [.font: font]
-                let charSize = charStr.size(withAttributes: charAttrs)
+            let totalLabelWidth = codexIcon.size().width + codexLabel.size().width
+            let labelStartX = (width - totalLabelWidth) / 2
 
-                let charColor: NSColor
-                if index == 0 {
-                    // "C" stays as base color (black/white), no animation
-                    charColor = codexBrandColor
-                } else {
-                    // "odex" get animated gradient
-                    let charPos = CGFloat(index - 1) / 4.0 // Normalize to 0-1 across "odex"
-                    let gradientPos = (charPos + codexGradientOffset).truncatingRemainder(dividingBy: 1.0)
-                    charColor = interpolateGradient(
-                        position: gradientPos,
-                        colors: [codexBlue, codexCyan, codexPurple]
-                    )
-                }
-
-                let charDrawAttrs: [NSAttributedString.Key: Any] = [
-                    .font: font,
-                    .foregroundColor: charColor
-                ]
-
-                charStr.draw(at: NSPoint(x: currentX, y: 12), withAttributes: charDrawAttrs)
-                currentX += charSize.width + letterSpacing
-            }
+            codexIcon.draw(at: NSPoint(x: labelStartX, y: 12))
+            codexLabel.draw(at: NSPoint(x: labelStartX + codexIcon.size().width, y: 12))
 
             yOffset = 0
         } else {
@@ -994,9 +939,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let primary = codex.primaryUsedPercent
         let secondary = codex.secondaryUsedPercent
 
-        // Use gradient colors for percentages based on usage
-        let primaryColor = getGradientColorForValue(primary, gradientOffset: codexGradientOffset, baseColor: codexBlue, accentColor: codexPurple, textColor: textColor)
-        let secondaryColor = getGradientColorForValue(secondary, gradientOffset: codexGradientOffset + 0.3, baseColor: codexBlue, accentColor: codexCyan, textColor: textColor)
+        // Use blue color for percentages based on usage
+        let primaryColor: NSColor = (primary == 0 || primary >= 90) ? codexBlue : textColor
+        let secondaryColor: NSColor = (secondary == 0 || secondary >= 80) ? codexBlue : textColor
 
         let tinyLabelAttributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 6, weight: .regular),
@@ -1043,37 +988,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         image.unlockFocus()
         image.isTemplate = false
         return (image, width)
-    }
-
-    // Helper: Interpolate between gradient colors based on position
-    private func interpolateGradient(position: CGFloat, colors: [NSColor]) -> NSColor {
-        guard !colors.isEmpty else { return NSColor.white }
-        guard colors.count > 1 else { return colors[0] }
-
-        let scaledPos = position * CGFloat(colors.count - 1)
-        let index = Int(scaledPos)
-        let localPos = scaledPos - CGFloat(index)
-
-        guard index < colors.count - 1 else { return colors.last! }
-
-        let color1 = colors[index]
-        let color2 = colors[index + 1]
-
-        let r = color1.redComponent + (color2.redComponent - color1.redComponent) * localPos
-        let g = color1.greenComponent + (color2.greenComponent - color1.greenComponent) * localPos
-        let b = color1.blueComponent + (color2.blueComponent - color1.blueComponent) * localPos
-
-        return NSColor(red: r, green: g, blue: b, alpha: 1.0)
-    }
-
-    // Helper: Get gradient color for a value (with animation for accent values)
-    private func getGradientColorForValue(_ value: Int, gradientOffset: CGFloat, baseColor: NSColor, accentColor: NSColor, textColor: NSColor) -> NSColor {
-        // Use gradient for special cases (0% or high usage), otherwise use text color
-        if value == 0 || value >= 90 {
-            let pos = gradientOffset.truncatingRemainder(dividingBy: 1.0)
-            return interpolateGradient(position: pos, colors: [baseColor, accentColor])
-        }
-        return textColor
     }
 
     // MARK: - Helpers

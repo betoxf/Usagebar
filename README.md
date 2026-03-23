@@ -2,6 +2,8 @@
 
 A lightweight macOS menu bar app that shows your **Claude** and **Codex** (OpenAI) usage at a glance -- 5-hour rolling window and 7-day limits, right in your menu bar.
 
+https://github.com/user-attachments/assets/59a0c8f4-d1a8-4de8-9e70-a3c0e8c1fe6d
+
 ![macOS](https://img.shields.io/badge/macOS-14.0%2B-blue)
 ![Swift](https://img.shields.io/badge/Swift-5.9-orange)
 ![License](https://img.shields.io/badge/License-MIT-green)
@@ -49,9 +51,9 @@ If you don't use the CLIs, click the menu bar item > **Setup Usage Tracking** > 
 | Provider | Label | Style |
 |----------|-------|-------|
 | Claude | `✳︎ Claude` | Anthropic orange accents |
-| Codex | **CODEX** | Heavy font, OpenAI green accents |
+| Codex | `> Codex` | Terminal icon, subtle blue accents |
 
-When both providers are active, the menu bar alternates between them with a smooth dissolve animation.
+When both providers are active, the menu bar alternates between them with a smooth dissolve animation. Left-click to switch manually, or use "Switch Every > Manual" for click-only mode.
 
 **Click the menu bar item** to see:
 
@@ -61,7 +63,7 @@ When both providers are active, the menu bar alternates between them with a smoo
 | Refresh (Cmd+R) | Manually refresh usage data |
 | Display > Show Both / 5h Only / Weekly Only | Change what numbers are shown |
 | Display > Show Claude / Show Codex | Toggle which providers appear |
-| Display > Switch Every | Animation interval (5s to 30s) |
+| Display > Switch Every | Animation interval (Manual / 5s / 8s / 10s / 15s / 30s) |
 | Show Icon | Toggle the provider label above the numbers |
 | Launch at Login | Start automatically on macOS login |
 | Sign Out | Sign out of Claude or Codex independently |
@@ -152,3 +154,9 @@ make release
 ## License
 
 MIT
+
+## Acknowledgments
+
+- **[CodexBar](https://github.com/steipete/CodexBar)** -- Authentication flow and browser session extraction inspired by this excellent Codex usage bar
+- **Anthropic** -- Claude API and Claude Code CLI
+- **OpenAI** -- Codex API and usage tracking

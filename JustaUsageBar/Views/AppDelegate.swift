@@ -6,7 +6,7 @@
 import SwiftUI
 import AppKit
 
-enum DisplayProvider {
+enum DisplayProvider: String {
     case claude
     case codex
 }
@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var viewModel = UsageViewModel.shared
     private var lastStatusLength: CGFloat = 0
     private var credentialsWindow: NSWindow?
+    private let preferredProviderDefaultsKey = "preferredDisplayProvider"
 
     // Animation state
     private var currentProvider: DisplayProvider = .claude
@@ -34,8 +35,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
 
         if viewModel.hasCredentials {
-            updateStatusImage()
-            startProviderAnimation()
+            syncCurrentProvider(preferSavedSelection: true, persistPreference: true)
+            restartProviderAnimation()
         } else {
             showSetupStatus()
         }
@@ -72,16 +73,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func settingsChanged() {
         if viewModel.hasCredentials {
-            updateStatusImage()
+            syncCurrentProvider()
+            restartProviderAnimation()
+        } else {
+            showSetupStatus()
         }
-        restartProviderAnimation()
         rebuildMenu()
     }
 
     @objc private func usageDataChanged() {
         if viewModel.hasCredentials {
-            updateStatusImage()
-            startProviderAnimation()
+            syncCurrentProvider()
+            restartProviderAnimation()
         } else {
             showSetupStatus()
         }
@@ -437,7 +440,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             if hasBoth {
                 // Switch provider immediately (manual mode or auto mode)
-                currentProvider = (currentProvider == .claude) ? .codex : .claude
+                setCurrentProvider((currentProvider == .claude) ? .codex : .claude)
                 updateStatusImage()
             } else {
                 // If only one provider, show menu
@@ -523,6 +526,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func setAnimationInterval(_ sender: NSMenuItem) {
         viewModel.animationInterval = Double(sender.tag)
+        if viewModel.animationInterval == 0 {
+            preferredProvider = currentProvider
+        }
         restartProviderAnimation()
         rebuildMenu()
     }
@@ -543,7 +549,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             stopProviderAnimation()
             showSetupStatus()
         } else {
-            currentProvider = .codex
+            syncCurrentProvider(persistPreference: true)
             updateStatusImage()
         }
         rebuildMenu()
@@ -555,7 +561,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             stopProviderAnimation()
             showSetupStatus()
         } else {
-            currentProvider = .claude
+            syncCurrentProvider(persistPreference: true)
             updateStatusImage()
         }
         rebuildMenu()
@@ -637,16 +643,96 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Provider Animation
 
+    private var preferredProvider: DisplayProvider {
+        get {
+            guard
+                let rawValue = UserDefaults.standard.string(forKey: preferredProviderDefaultsKey),
+                let provider = DisplayProvider(rawValue: rawValue)
+            else {
+                return .claude
+            }
+            return provider
+        }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: preferredProviderDefaultsKey)
+        }
+    }
+
+    private func hasCredentials(for provider: DisplayProvider) -> Bool {
+        switch provider {
+        case .claude:
+            return viewModel.hasClaudeCredentials
+        case .codex:
+            return viewModel.hasCodexCredentials
+        }
+    }
+
+    private func isProviderEnabled(_ provider: DisplayProvider) -> Bool {
+        switch provider {
+        case .claude:
+            return viewModel.showClaude
+        case .codex:
+            return viewModel.showCodex
+        }
+    }
+
+    private func hasShownProviderWithCredentials(excluding excludedProvider: DisplayProvider) -> Bool {
+        for provider in [DisplayProvider.claude, .codex] where provider != excludedProvider {
+            if hasCredentials(for: provider) && isProviderEnabled(provider) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func canDisplay(_ provider: DisplayProvider) -> Bool {
+        guard hasCredentials(for: provider) else { return false }
+
+        if isProviderEnabled(provider) {
+            return true
+        }
+
+        // If the saved provider is the only authenticated one left, keep showing it
+        // instead of falling back to a blank/incorrect status item.
+        return !hasShownProviderWithCredentials(excluding: provider)
+    }
+
+    private func resolveProvider(preferred provider: DisplayProvider) -> DisplayProvider? {
+        if canDisplay(provider) {
+            return provider
+        }
+
+        let fallback: DisplayProvider = (provider == .claude) ? .codex : .claude
+        if canDisplay(fallback) {
+            return fallback
+        }
+
+        return nil
+    }
+
+    private func setCurrentProvider(_ provider: DisplayProvider, persistPreference: Bool = true) {
+        currentProvider = provider
+
+        if persistPreference {
+            preferredProvider = provider
+        }
+    }
+
+    private func syncCurrentProvider(preferSavedSelection: Bool = false, persistPreference: Bool = false) {
+        let preferredSelection = preferSavedSelection ? preferredProvider : currentProvider
+
+        guard let resolvedProvider = resolveProvider(preferred: preferredSelection) else {
+            return
+        }
+
+        setCurrentProvider(resolvedProvider, persistPreference: persistPreference)
+    }
+
     private func startProviderAnimation() {
         stopProviderAnimation()
+        syncCurrentProvider()
 
         guard viewModel.shouldAnimateProviders else {
-            // Show whichever is available
-            if viewModel.hasClaudeCredentials && viewModel.showClaude {
-                currentProvider = .claude
-            } else if viewModel.hasCodexCredentials && viewModel.showCodex {
-                currentProvider = .codex
-            }
             return
         }
 
@@ -695,7 +781,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     timer.invalidate()
                     self.transitionTimer = nil
                     self.isTransitioning = false
-                    self.currentProvider = (self.currentProvider == .claude) ? .codex : .claude
+                    self.setCurrentProvider((self.currentProvider == .claude) ? .codex : .claude, persistPreference: false)
                     self.updateStatusImage()
                 } else {
                     self.renderTransitionFrame()
@@ -767,6 +853,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func updateStatusImage() {
         guard !isTransitioning else { return }
         guard let button = statusItem.button else { return }
+        syncCurrentProvider()
 
         let (image, width) = createProviderImage(for: currentProvider)
 

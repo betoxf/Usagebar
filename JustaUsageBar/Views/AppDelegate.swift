@@ -568,77 +568,177 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func checkForUpdates() {
+        let appURL = Bundle.main.bundleURL
+
         Task {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/opt/homebrew/bin/brew")
-            process.arguments = ["upgrade", "betoxf/tap/justausagebar"]
+            let updateResult = await Task.detached(priority: .userInitiated) {
+                Self.performHomebrewUpdate()
+            }.value
 
-            let pipe = Pipe()
-            process.standardOutput = pipe
-            process.standardError = pipe
-
-            do {
-                try process.run()
-                process.waitUntilExit()
-
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                let output = String(data: data, encoding: .utf8) ?? ""
-
-                if process.terminationStatus == 0 && !output.contains("already installed") {
-                    // Updated — relaunch the app
-                    let appURL = Bundle.main.bundleURL
-                    let config = NSWorkspace.OpenConfiguration()
-                    config.createsNewApplicationInstance = true
-                    NSWorkspace.shared.openApplication(at: appURL, configuration: config) { _, _ in
-                        NSApp.terminate(nil)
-                    }
-                } else {
-                    // Already up to date — show brief notification via menu
-                    let alert = NSAlert()
-                    alert.messageText = "Already up to date"
-                    alert.informativeText = "JustaUsageBar is on the latest version."
-                    alert.alertStyle = .informational
-                    alert.runModal()
-                }
-            } catch {
-                // brew not at /opt/homebrew — try /usr/local
-                let fallback = Process()
-                fallback.executableURL = URL(fileURLWithPath: "/usr/local/bin/brew")
-                fallback.arguments = ["upgrade", "betoxf/tap/justausagebar"]
-                let fallbackPipe = Pipe()
-                fallback.standardOutput = fallbackPipe
-                fallback.standardError = fallbackPipe
-
-                do {
-                    try fallback.run()
-                    fallback.waitUntilExit()
-
-                    let data = fallbackPipe.fileHandleForReading.readDataToEndOfFile()
-                    let output = String(data: data, encoding: .utf8) ?? ""
-
-                    if fallback.terminationStatus == 0 && !output.contains("already installed") {
-                        let appURL = Bundle.main.bundleURL
-                        let config = NSWorkspace.OpenConfiguration()
-                        config.createsNewApplicationInstance = true
-                        NSWorkspace.shared.openApplication(at: appURL, configuration: config) { _, _ in
-                            NSApp.terminate(nil)
-                        }
-                    } else {
-                        let alert = NSAlert()
-                        alert.messageText = "Already up to date"
-                        alert.informativeText = "JustaUsageBar is on the latest version."
-                        alert.alertStyle = .informational
-                        alert.runModal()
-                    }
-                } catch {
-                    let alert = NSAlert()
-                    alert.messageText = "Update failed"
-                    alert.informativeText = "Could not find Homebrew. Run in terminal:\nbrew upgrade betoxf/tap/justausagebar"
-                    alert.alertStyle = .warning
-                    alert.runModal()
-                }
+            switch updateResult {
+            case .updated:
+                relaunchApplication(at: appURL)
+            case .alreadyUpToDate:
+                presentAlert(
+                    title: "Already up to date",
+                    message: "JustaUsageBar is on the latest version.",
+                    style: .informational
+                )
+            case .failed(let message):
+                presentAlert(
+                    title: "Update failed",
+                    message: message,
+                    style: .warning
+                )
             }
         }
+    }
+
+    private func relaunchApplication(at appURL: URL) {
+        let config = NSWorkspace.OpenConfiguration()
+        config.createsNewApplicationInstance = true
+
+        NSWorkspace.shared.openApplication(at: appURL, configuration: config) { _, _ in
+            NSApp.terminate(nil)
+        }
+    }
+
+    private func presentAlert(title: String, message: String, style: NSAlert.Style) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.alertStyle = style
+        alert.runModal()
+    }
+
+    private enum UpdateResult {
+        case updated
+        case alreadyUpToDate
+        case failed(String)
+    }
+
+    private struct CommandResult {
+        let status: Int32
+        let output: String
+    }
+
+    nonisolated private static func performHomebrewUpdate() -> UpdateResult {
+        guard let brewURL = brewExecutableURL() else {
+            return .failed("""
+            Homebrew was not found. Run in Terminal:
+            brew update && brew upgrade --cask justausagebar
+            """)
+        }
+
+        do {
+            let isManagedByBrew = try runCommand(
+                executableURL: brewURL,
+                arguments: ["list", "--cask", "justausagebar"]
+            )
+
+            guard isManagedByBrew.status == 0 else {
+                return .failed("""
+                This copy of JustaUsageBar is not managed by Homebrew cask.
+                Reinstall it with:
+                brew install --cask betoxf/tap/justausagebar
+                """)
+            }
+
+            let update = try runCommand(executableURL: brewURL, arguments: ["update", "--quiet"])
+            guard update.status == 0 else {
+                return .failed("""
+                Homebrew update failed.
+                \(summarizeCommandOutput(update.output))
+                """)
+            }
+
+            let outdated = try runCommand(
+                executableURL: brewURL,
+                arguments: ["outdated", "--cask", "justausagebar"]
+            )
+
+            guard outdated.status == 0 else {
+                return .failed("""
+                Could not check for updates.
+                \(summarizeCommandOutput(outdated.output))
+                """)
+            }
+
+            let isOutdated = outdated.output
+                .split(whereSeparator: \.isNewline)
+                .contains { line in
+                    line.trimmingCharacters(in: .whitespacesAndNewlines) == "justausagebar"
+                }
+
+            guard isOutdated else {
+                return .alreadyUpToDate
+            }
+
+            let upgrade = try runCommand(
+                executableURL: brewURL,
+                arguments: ["upgrade", "--cask", "justausagebar"]
+            )
+
+            guard upgrade.status == 0 else {
+                return .failed("""
+                Homebrew could not install the update.
+                \(summarizeCommandOutput(upgrade.output))
+                """)
+            }
+
+            return .updated
+        } catch {
+            return .failed("""
+            Homebrew update failed.
+            \(error.localizedDescription)
+            """)
+        }
+    }
+
+    nonisolated private static func brewExecutableURL() -> URL? {
+        let candidatePaths = [
+            "/opt/homebrew/bin/brew",
+            "/usr/local/bin/brew"
+        ]
+
+        let fileManager = FileManager.default
+
+        for path in candidatePaths where fileManager.isExecutableFile(atPath: path) {
+            return URL(fileURLWithPath: path)
+        }
+
+        return nil
+    }
+
+    nonisolated private static func runCommand(executableURL: URL, arguments: [String]) throws -> CommandResult {
+        let process = Process()
+        process.executableURL = executableURL
+        process.arguments = arguments
+
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+
+        try process.run()
+
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+
+        let output = String(data: data, encoding: .utf8) ?? ""
+        return CommandResult(status: process.terminationStatus, output: output)
+    }
+
+    nonisolated private static func summarizeCommandOutput(_ output: String) -> String {
+        let trimmedLines = output
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        guard !trimmedLines.isEmpty else {
+            return "No additional details were returned by Homebrew."
+        }
+
+        return trimmedLines.prefix(6).joined(separator: "\n")
     }
 
     // MARK: - Provider Animation

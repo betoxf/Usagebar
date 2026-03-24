@@ -105,7 +105,7 @@ codex login
 | Action | Command |
 |--------|---------|
 | Install | `brew install betoxf/tap/justausagebar` |
-| Update | `brew upgrade betoxf/tap/justausagebar` |
+| Update | `brew update && brew upgrade --cask justausagebar` |
 | Uninstall | `brew uninstall justausagebar` |
 | Check version | `brew info betoxf/tap/justausagebar` |
 | Check auto-start | Menu bar > look for checkmark on "Launch at Login" |

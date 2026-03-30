@@ -24,7 +24,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var currentProvider: DisplayProvider = .claude
     private var providerSwitchTimer: Timer?
     private var transitionTimer: Timer?
+    private var promoAnimationTimer: Timer?
     private var transitionProgress: CGFloat = 0
+    private var promoAnimationPhase: CGFloat = 0
+    private var promoHeaderShowsCountdown = true
+    private var lastPromoHeaderSlot: Int?
     private var isTransitioning = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -37,6 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if viewModel.hasCredentials {
             syncCurrentProvider(preferSavedSelection: true, persistPreference: true)
             restartProviderAnimation()
+            restartPromoAnimation()
         } else {
             showSetupStatus()
         }
@@ -75,6 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if viewModel.hasCredentials {
             syncCurrentProvider()
             restartProviderAnimation()
+            restartPromoAnimation()
         } else {
             showSetupStatus()
         }
@@ -85,6 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if viewModel.hasCredentials {
             syncCurrentProvider()
             restartProviderAnimation()
+            restartPromoAnimation()
         } else {
             showSetupStatus()
         }
@@ -105,6 +112,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showSetupStatus() {
         stopProviderAnimation()
+        stopPromoAnimation()
         guard let button = statusItem.button else { return }
 
         let width: CGFloat = 50
@@ -247,18 +255,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // Build header with plan type
                 let codex = viewModel.codexUsageData
                 let planInfo = codex.planType != "unknown" ? codex.planType.capitalized : ""
+                let promoLabel: String = {
+                    guard viewModel.isPromoVisibilityInWindow else { return "" }
+                    if promoHeaderShowsCountdown, let remaining = viewModel.codexPromoTimeRemainingText {
+                        return "• 2x • \(remaining)"
+                    }
+                    return "• 2x • \(viewModel.codexPromoEndDisplayText)"
+                }()
 
                 let headerString = NSMutableAttributedString()
                 headerString.append(NSAttributedString(string: "Codex  ", attributes: [
                     .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
                     .foregroundColor: codexBlue
                 ]))
-                headerString.append(NSAttributedString(string: "  ", attributes: [
-                    .font: NSFont.systemFont(ofSize: 12, weight: .semibold)
-                ]))
                 if !planInfo.isEmpty {
                     headerString.append(NSAttributedString(string: planInfo, attributes: [
                         .font: NSFont.systemFont(ofSize: 11, weight: .regular),
+                        .foregroundColor: NSColor.secondaryLabelColor
+                    ]))
+                }
+                if !promoLabel.isEmpty {
+                    headerString.append(NSAttributedString(string: promoLabel, attributes: [
+                        .font: NSFont.systemFont(ofSize: 10, weight: .regular),
                         .foregroundColor: NSColor.secondaryLabelColor
                     ]))
                 }
@@ -328,6 +346,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onlyWeeklyItem.target = self
             onlyWeeklyItem.state = viewModel.showOnlyWeekly ? .on : .off
             displayMenu.addItem(onlyWeeklyItem)
+
+            if hasCodex {
+                let promoVisibilityItem = NSMenuItem(title: "Show Promo Visibility", action: #selector(togglePromoVisibility), keyEquivalent: "")
+                promoVisibilityItem.target = self
+                promoVisibilityItem.state = viewModel.showPromoVisibility ? .on : .off
+                promoVisibilityItem.isEnabled = viewModel.isPromoVisibilityInWindow
+                displayMenu.addItem(promoVisibilityItem)
+            }
 
             // Provider toggles
             if hasClaude || hasCodex {
@@ -504,6 +530,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func showOnlyWeekly() {
         viewModel.showOnly5hr = false
         viewModel.showOnlyWeekly = true
+        NotificationCenter.default.post(name: NSNotification.Name("SettingsChanged"), object: nil)
+    }
+
+    @objc private func togglePromoVisibility() {
+        viewModel.showPromoVisibility.toggle()
         NotificationCenter.default.post(name: NSNotification.Name("SettingsChanged"), object: nil)
     }
 
@@ -837,7 +868,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         providerSwitchTimer = Timer.scheduledTimer(withTimeInterval: viewModel.animationInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor in
+            Task { @MainActor [weak self] in
                 self?.beginTransition()
             }
         }
@@ -860,6 +891,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func startPromoAnimation() {
+        stopPromoAnimation()
+
+        guard viewModel.shouldShowCodexPromo else {
+            promoAnimationPhase = 0
+            promoHeaderShowsCountdown = true
+            lastPromoHeaderSlot = nil
+            return
+        }
+
+        promoAnimationTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 15.0, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
+
+                guard self.viewModel.shouldShowCodexPromo else {
+                    self.stopPromoAnimation()
+                    self.updateStatusImage()
+                    return
+                }
+
+                self.promoAnimationPhase = (self.promoAnimationPhase + 0.045).truncatingRemainder(dividingBy: 1.0)
+                let currentSlot = Int(Date().timeIntervalSinceReferenceDate / 2.0)
+                if self.lastPromoHeaderSlot != currentSlot {
+                    self.lastPromoHeaderSlot = currentSlot
+                    self.promoHeaderShowsCountdown = currentSlot.isMultiple(of: 2)
+                    self.rebuildMenu()
+                }
+
+                if self.isTransitioning {
+                    self.renderTransitionFrame()
+                } else if self.currentProvider == .codex {
+                    self.updateStatusImage()
+                }
+            }
+        }
+    }
+
+    private func stopPromoAnimation() {
+        promoAnimationTimer?.invalidate()
+        promoAnimationTimer = nil
+        lastPromoHeaderSlot = nil
+    }
+
+    private func restartPromoAnimation() {
+        if viewModel.hasCredentials {
+            startPromoAnimation()
+        } else {
+            stopPromoAnimation()
+        }
+    }
+
     private func beginTransition() {
         guard !isTransitioning else { return }
         guard viewModel.shouldAnimateProviders else { return }
@@ -870,15 +952,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let totalFrames: CGFloat = 20
         let frameDuration: TimeInterval = 1.0 / 60.0
 
-        transitionTimer = Timer.scheduledTimer(withTimeInterval: frameDuration, repeats: true) { [weak self] timer in
-            Task { @MainActor in
-                guard let self = self else { timer.invalidate(); return }
+        transitionTimer = Timer.scheduledTimer(withTimeInterval: frameDuration, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self = self else { return }
 
                 self.transitionProgress += 1.0 / totalFrames
 
                 if self.transitionProgress >= 1.0 {
                     self.transitionProgress = 1.0
-                    timer.invalidate()
+                    self.transitionTimer?.invalidate()
                     self.transitionTimer = nil
                     self.isTransitioning = false
                     self.setCurrentProvider((self.currentProvider == .claude) ? .codex : .claude, persistPreference: false)
@@ -1076,9 +1158,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let showIcon = viewModel.showIcon
         let showOnly5hr = viewModel.showOnly5hr
         let showOnlyWeekly = viewModel.showOnlyWeekly
+        let showPromo = viewModel.shouldShowCodexPromo && !showOnlyWeekly
 
         var width: CGFloat = 80
         if showOnly5hr || showOnlyWeekly { width = 50 }
+        if showPromo { width += 14 }
 
         let height: CGFloat = showIcon ? 22 : 16
 
@@ -1170,7 +1254,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             valuesString.append(NSAttributedString(string: "%", attributes: percentSecondaryAttributes))
         }
 
-        valuesString.draw(at: NSPoint(x: (width - valuesString.size().width) / 2, y: yOffset))
+        if showPromo {
+            let promo2Attributes: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 9, weight: .semibold),
+                .foregroundColor: animatedPromoColor(phaseShift: 0.08)
+            ]
+            let promoXAttributes: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 9, weight: .bold),
+                .foregroundColor: animatedPromoColor(phaseShift: 0.2)
+            ]
+
+            let promoString = NSMutableAttributedString()
+            promoString.append(NSAttributedString(string: "2", attributes: promo2Attributes))
+            promoString.append(NSAttributedString(string: "x", attributes: promoXAttributes))
+
+            let promoGap: CGFloat = 4
+            let totalWidth = promoString.size().width + promoGap + valuesString.size().width
+            let startX = (width - totalWidth) / 2
+            let promoY = (height - promoString.size().height) / 2 - (promoString.size().height * 0.2)
+
+            promoString.draw(at: NSPoint(x: startX, y: promoY))
+            valuesString.draw(at: NSPoint(x: startX + promoString.size().width + promoGap, y: yOffset))
+        } else {
+            valuesString.draw(at: NSPoint(x: (width - valuesString.size().width) / 2, y: yOffset))
+        }
 
         image.unlockFocus()
         image.isTemplate = false
@@ -1178,6 +1285,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // MARK: - Helpers
+
+    private func animatedPromoColor(phaseShift: CGFloat) -> NSColor {
+        let colors = [
+            NSColor(red: 0.15, green: 0.81, blue: 0.63, alpha: 1.0),
+            NSColor(red: 0.14, green: 0.73, blue: 0.94, alpha: 1.0),
+            NSColor(red: 0.33, green: 0.57, blue: 0.99, alpha: 1.0)
+        ]
+
+        let normalizedPhase = (promoAnimationPhase + phaseShift).truncatingRemainder(dividingBy: 1.0)
+        let scaled = normalizedPhase * CGFloat(colors.count)
+        let startIndex = Int(floor(scaled)) % colors.count
+        let endIndex = (startIndex + 1) % colors.count
+        let blend = scaled - CGFloat(startIndex)
+
+        return colors[startIndex].blended(withFraction: blend, of: colors[endIndex]) ?? colors[startIndex]
+    }
 
     private func getDarkMode() -> Bool {
         if let button = statusItem.button {

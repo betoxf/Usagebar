@@ -37,6 +37,7 @@ final class UsageViewModel: ObservableObject {
     @AppStorage("showOnlyWeekly") var showOnlyWeekly: Bool = false
     @AppStorage("showClaude") var showClaude: Bool = true
     @AppStorage("showCodex") var showCodex: Bool = true
+    @AppStorage("showPromoVisibility") var showPromoVisibility: Bool = true
     @AppStorage("animationInterval") var animationInterval: Double = 8.0
 
     // Launch at login using SMAppService (macOS 13+)
@@ -197,6 +198,71 @@ final class UsageViewModel: ObservableObject {
     /// Whether both providers are active and should animate
     var shouldAnimateProviders: Bool {
         showClaude && showCodex && hasClaudeCredentials && hasCodexCredentials && animationInterval > 0
+    }
+
+    private var codexPromoTimeZone: TimeZone {
+        TimeZone(identifier: "America/Los_Angeles") ?? .current
+    }
+
+    var codexPromoEndDate: Date? {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = codexPromoTimeZone
+        return calendar.date(from: DateComponents(
+            timeZone: codexPromoTimeZone,
+            year: 2026,
+            month: 4,
+            day: 2,
+            hour: 23,
+            minute: 59,
+            second: 59
+        ))
+    }
+
+    /// Temporary Codex promo runs through April 2, 2026 at 11:59 PM PT.
+    var isPromoVisibilityInWindow: Bool {
+        guard let cutoff = codexPromoEndDate else {
+            return false
+        }
+        return Date() <= cutoff
+    }
+
+    var shouldShowCodexPromo: Bool {
+        showPromoVisibility && isPromoVisibilityInWindow && showCodex && hasCodexCredentials
+    }
+
+    var codexPromoEndDisplayText: String {
+        guard let endDate = codexPromoEndDate else {
+            return "Apr 2"
+        }
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = codexPromoTimeZone
+        formatter.dateFormat = "MMM d"
+        return formatter.string(from: endDate)
+    }
+
+    var codexPromoTimeRemainingText: String? {
+        guard let endDate = codexPromoEndDate else {
+            return nil
+        }
+
+        let remaining = Int(endDate.timeIntervalSinceNow)
+        guard remaining > 0 else {
+            return nil
+        }
+
+        let days = remaining / 86_400
+        let hours = (remaining % 86_400) / 3_600
+        let minutes = (remaining % 3_600) / 60
+
+        if days > 0 {
+            return "\(days)d \(hours)h left"
+        }
+        if hours > 0 {
+            return "\(hours)h \(minutes)m left"
+        }
+        return "\(max(minutes, 1))m left"
     }
 
     func saveCredentials(sessionKey: String, organizationId: String) {

@@ -22,6 +22,17 @@ brew install betoxf/tap/justausagebar
 
 That's it. If you have Claude CLI or Codex CLI logged in, the app auto-detects your credentials -- zero config.
 
+## Update
+
+If you already have the app installed, update it with:
+
+```bash
+brew update
+brew upgrade --cask justausagebar
+```
+
+If you installed manually, download the latest `JustaUsageBar.app` from Releases and replace the copy in `/Applications`.
+
 > **No Homebrew?** Run this instead:
 > ```bash
 > /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/betoxf/JustaUsageBar/main/install.sh)"
@@ -47,6 +58,7 @@ If you don't use the CLIs, click the menu bar item > **Setup Usage Tracking** > 
 - Configurable switch interval (5s / 8s / 10s / 15s / 30s)
 - Display modes: Both percentages, 5h only, or Weekly only
 - Toggle providers: show Claude, Codex, or both
+- Temporary Codex `2x` promo badge with compact dropdown countdown/date display while the promo is active
 - Auto-refreshes OAuth tokens when expired
 - Falls back to browser session login for Claude if CLI not available
 - Launch at Login support
@@ -61,6 +73,8 @@ If you don't use the CLIs, click the menu bar item > **Setup Usage Tracking** > 
 
 When both providers are active, the menu bar alternates between them with a smooth dissolve animation. Left-click to switch manually, or use "Switch Every > Manual" for click-only mode.
 
+When OpenAI is running a temporary Codex limit boost, the menu bar can show a compact `2x` badge before the Codex 5h value. In the dropdown, the Codex row alternates between time remaining and the end date, and the badge disappears automatically after the promo expires.
+
 **Click the menu bar item** to see:
 
 | Option | What it does |
@@ -68,6 +82,7 @@ When both providers are active, the menu bar alternates between them with a smoo
 | Usage details | Current % and time until reset for each provider |
 | Refresh (Cmd+R) | Manually refresh usage data |
 | Display > Show Both / 5h Only / Weekly Only | Change what numbers are shown |
+| Display > Show Promo Visibility | Show or hide the temporary Codex `2x` promo badge when available |
 | Display > Show Claude / Show Codex | Toggle which providers appear |
 | Display > Switch Every | Animation interval (Manual / 5s / 8s / 10s / 15s / 30s) |
 | Show Icon | Toggle the provider label above the numbers |
@@ -146,7 +161,7 @@ Usage refreshes every 60 seconds. OAuth tokens refresh automatically when expire
 git clone https://github.com/betoxf/JustaUsageBar.git
 cd JustaUsageBar
 make release
-# App at build/Release/JustaUsageBar.app -- drag to /Applications
+# App at build/DerivedData/Build/Products/Release/JustaUsageBar.app -- drag to /Applications
 ```
 
 ## Privacy & Security

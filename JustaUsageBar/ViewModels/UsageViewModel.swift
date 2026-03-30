@@ -230,6 +230,29 @@ final class UsageViewModel: ObservableObject {
         showPromoVisibility && isPromoVisibilityInWindow && showCodex && hasCodexCredentials
     }
 
+    private var claudePeakTimeZone: TimeZone {
+        TimeZone(identifier: "America/Los_Angeles") ?? .current
+    }
+
+    var isClaudePeakHours: Bool {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = claudePeakTimeZone
+
+        let now = Date()
+        let weekday = calendar.component(.weekday, from: now)
+        let isWeekday = (2...6).contains(weekday)
+        guard isWeekday else {
+            return false
+        }
+
+        let hour = calendar.component(.hour, from: now)
+        return hour >= 5 && hour < 11
+    }
+
+    var shouldShowClaudePeakIndicator: Bool {
+        showClaude && hasClaudeCredentials && isClaudePeakHours
+    }
+
     var codexPromoEndDisplayText: String {
         guard let endDate = codexPromoEndDate else {
             return "Apr 2"

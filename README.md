@@ -59,6 +59,7 @@ If you don't use the CLIs, click the menu bar item > **Setup Usage Tracking** > 
 - Display modes: Both percentages, 5h only, or Weekly only
 - Toggle providers: show Claude, Codex, or both
 - Temporary Codex `2x` promo badge with compact dropdown countdown/date display while the promo is active
+- Claude peak-hours indicator with animated downward badge during faster-consumption windows
 - Auto-refreshes OAuth tokens when expired
 - Falls back to browser session login for Claude if CLI not available
 - Launch at Login support
@@ -74,6 +75,8 @@ If you don't use the CLIs, click the menu bar item > **Setup Usage Tracking** > 
 When both providers are active, the menu bar alternates between them with a smooth dissolve animation. Left-click to switch manually, or use "Switch Every > Manual" for click-only mode.
 
 When OpenAI is running a temporary Codex limit boost, the menu bar can show a compact `2x` badge before the Codex 5h value. In the dropdown, the Codex row alternates between time remaining and the end date, and the badge disappears automatically after the promo expires.
+
+During Anthropic weekday peak hours, Claude can show an animated downward indicator before the Claude 5h value. In the dropdown, the Claude section adds a compact `↓ Peak hour` note, and hovering the menu bar item shows a `faster consumption` tooltip.
 
 **Click the menu bar item** to see:
 
@@ -145,6 +148,13 @@ codex login
 | Codex | `GET chatgpt.com/backend-api/wham/usage` |
 
 Usage refreshes every 60 seconds. OAuth tokens refresh automatically when expired.
+
+### Temporary Indicators
+
+| Provider | Indicator | Behavior |
+|----------|-----------|----------|
+| Codex | `2x` badge | Shows while the temporary OpenAI limit boost is active, alternates compact dropdown text between time left and end date, and auto-hides after expiry |
+| Claude | Downward peak-hours badge | Shows during Anthropic weekday peak hours when limits are consumed faster, adds `↓ Peak hour` in the dropdown, and exposes a hover tooltip |
 
 ## Troubleshooting
 

@@ -159,6 +159,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         statusItem.length = width
         button.image = image
+        button.toolTip = nil
     }
 
     private func setupMenu() {
@@ -186,6 +187,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
                 // Build header with auth method
                 let authMethod = viewModel.claudeAuthSource == .oauth ? "via CLI" : "via Browser"
+                let peakLabel = viewModel.shouldShowClaudePeakIndicator ? "  ↓ Peak hour" : ""
 
                 let headerString = NSMutableAttributedString()
                 headerString.append(NSAttributedString(string: "\u{2733}\u{FE0E} Claude  ", attributes: [
@@ -199,6 +201,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     .font: NSFont.systemFont(ofSize: 11, weight: .regular),
                     .foregroundColor: NSColor.secondaryLabelColor
                 ]))
+                if !peakLabel.isEmpty {
+                    headerString.append(NSAttributedString(string: peakLabel, attributes: [
+                        .font: NSFont.systemFont(ofSize: 10, weight: .regular),
+                        .foregroundColor: anthropicOrange.withAlphaComponent(0.9)
+                    ]))
+                }
 
                 claudeHeader.attributedTitle = headerString
                 menu.addItem(claudeHeader)
@@ -894,7 +902,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func startPromoAnimation() {
         stopPromoAnimation()
 
-        guard viewModel.shouldShowCodexPromo else {
+        guard viewModel.shouldShowCodexPromo || viewModel.shouldShowClaudePeakIndicator else {
             promoAnimationPhase = 0
             promoHeaderShowsCountdown = true
             lastPromoHeaderSlot = nil
@@ -905,7 +913,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor [weak self] in
                 guard let self = self else { return }
 
-                guard self.viewModel.shouldShowCodexPromo else {
+                guard self.viewModel.shouldShowCodexPromo || self.viewModel.shouldShowClaudePeakIndicator else {
                     self.stopPromoAnimation()
                     self.updateStatusImage()
                     return
@@ -921,7 +929,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
                 if self.isTransitioning {
                     self.renderTransitionFrame()
-                } else if self.currentProvider == .codex {
+                } else if self.currentProvider == .codex || self.currentProvider == .claude {
                     self.updateStatusImage()
                 }
             }
@@ -935,7 +943,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func restartPromoAnimation() {
-        if viewModel.hasCredentials {
+        if viewModel.hasCredentials && (viewModel.shouldShowCodexPromo || viewModel.shouldShowClaudePeakIndicator) {
             startPromoAnimation()
         } else {
             stopPromoAnimation()
@@ -1028,6 +1036,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             statusItem.length = maxWidth
         }
         button.image = image
+        button.toolTip = statusTooltip(for: currentProvider)
     }
 
     // MARK: - Status Bar Image
@@ -1045,6 +1054,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         button.image = image
+        button.toolTip = statusTooltip(for: currentProvider)
     }
 
     private func createProviderImage(for provider: DisplayProvider) -> (NSImage, CGFloat) {
@@ -1062,9 +1072,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let showIcon = viewModel.showIcon
         let showOnly5hr = viewModel.showOnly5hr
         let showOnlyWeekly = viewModel.showOnlyWeekly
+        let showPeakIndicator = viewModel.shouldShowClaudePeakIndicator && !showOnlyWeekly
 
         var width: CGFloat = 80
         if showOnly5hr || showOnlyWeekly { width = 50 }
+        if showPeakIndicator { width += 14 }
 
         let height: CGFloat = showIcon ? 22 : 16
 
@@ -1145,7 +1157,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             valuesString.append(NSAttributedString(string: "%", attributes: percentWAttributes))
         }
 
-        valuesString.draw(at: NSPoint(x: (width - valuesString.size().width) / 2, y: yOffset))
+        if showPeakIndicator {
+            let symbolConfig = NSImage.SymbolConfiguration(pointSize: 9, weight: .semibold)
+            let arrowSize = NSSize(width: 10, height: 10)
+            let badgeGap: CGFloat = 4
+            let totalWidth = arrowSize.width + badgeGap + valuesString.size().width
+            let startX = (width - totalWidth) / 2
+            let badgeY = (height - arrowSize.height) / 2 - 0.2
+
+            if let arrowSymbol = NSImage(
+                systemSymbolName: "arrow.down.circle.fill",
+                accessibilityDescription: "Claude peak hour"
+            )?.withSymbolConfiguration(symbolConfig) {
+                let tintedSymbol = arrowSymbol.copy() as? NSImage ?? arrowSymbol
+                tintedSymbol.lockFocus()
+                animatedClaudePeakColor().set()
+                NSRect(origin: .zero, size: tintedSymbol.size).fill(using: .sourceAtop)
+                tintedSymbol.unlockFocus()
+                tintedSymbol.draw(in: NSRect(x: startX, y: badgeY, width: arrowSize.width, height: arrowSize.height))
+            }
+
+            valuesString.draw(at: NSPoint(x: startX + arrowSize.width + badgeGap, y: yOffset))
+        } else {
+            valuesString.draw(at: NSPoint(x: (width - valuesString.size().width) / 2, y: yOffset))
+        }
 
         image.unlockFocus()
         image.isTemplate = false
@@ -1300,6 +1335,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let blend = scaled - CGFloat(startIndex)
 
         return colors[startIndex].blended(withFraction: blend, of: colors[endIndex]) ?? colors[startIndex]
+    }
+
+    private func animatedClaudePeakColor() -> NSColor {
+        let colors = [
+            NSColor(red: 0.83, green: 0.53, blue: 0.30, alpha: 1.0),
+            NSColor(red: 0.91, green: 0.67, blue: 0.45, alpha: 1.0),
+            NSColor(red: 0.75, green: 0.42, blue: 0.20, alpha: 1.0)
+        ]
+
+        let scaled = promoAnimationPhase * CGFloat(colors.count)
+        let startIndex = Int(floor(scaled)) % colors.count
+        let endIndex = (startIndex + 1) % colors.count
+        let blend = scaled - CGFloat(startIndex)
+
+        return colors[startIndex].blended(withFraction: blend, of: colors[endIndex]) ?? colors[startIndex]
+    }
+
+    private func statusTooltip(for provider: DisplayProvider) -> String? {
+        switch provider {
+        case .claude:
+            return viewModel.shouldShowClaudePeakIndicator ? "Claude peak hour: faster consumption" : nil
+        case .codex:
+            return viewModel.shouldShowCodexPromo ? "Codex 2x usage active" : nil
+        }
     }
 
     private func getDarkMode() -> Bool {

@@ -23,13 +23,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Animation state
     private var currentProvider: DisplayProvider = .claude
     private var providerSwitchTimer: Timer?
-    private var transitionTimer: Timer?
     private var promoAnimationTimer: Timer?
-    private var transitionProgress: CGFloat = 0
     private var promoAnimationPhase: CGFloat = 0
     private var promoHeaderShowsCountdown = true
     private var lastPromoHeaderSlot: Int?
-    private var isTransitioning = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusItem()
@@ -81,6 +78,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             syncCurrentProvider()
             restartProviderAnimation()
             restartPromoAnimation()
+            updateStatusImage()
         } else {
             showSetupStatus()
         }
@@ -90,8 +88,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func usageDataChanged() {
         if viewModel.hasCredentials {
             syncCurrentProvider()
-            restartProviderAnimation()
             restartPromoAnimation()
+            updateStatusImage()
         } else {
             showSetupStatus()
         }
@@ -180,7 +178,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menu.addItem(setupItem)
         } else {
             // Claude usage section
-            if hasClaude && viewModel.showClaude {
+            if viewModel.showClaude {
                 let claudeHeader = NSMenuItem(title: "Claude", action: nil, keyEquivalent: "")
                 claudeHeader.isEnabled = false
                 let anthropicOrange = NSColor(red: 0.83, green: 0.53, blue: 0.30, alpha: 1.0)
@@ -189,8 +187,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let authMethod: String = switch viewModel.claudeAuthSource {
                 case .oauth:
                     "via OAuth"
-                case .cli:
-                    "via CLI"
                 case .webSession:
                     "via Browser"
                 case .none:
@@ -220,48 +216,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 claudeHeader.attributedTitle = headerString
                 menu.addItem(claudeHeader)
 
-                let fiveHour = viewModel.usageData.fiveHourUsed
-                let weekly = viewModel.usageData.weeklyUsed
-                let fiveHourReset = viewModel.usageData.timeUntilFiveHourReset
-                let weeklyReset = viewModel.usageData.timeUntilWeeklyReset
+                if hasClaude {
+                    let fiveHour = viewModel.usageData.fiveHourUsed
+                    let weekly = viewModel.usageData.weeklyUsed
+                    let fiveHourReset = viewModel.usageData.timeUntilFiveHourReset
+                    let weeklyReset = viewModel.usageData.timeUntilWeeklyReset
 
-                // Styled percentage items
-                let fiveHourColor: NSColor = (fiveHour == 0 || fiveHour >= 90) ? anthropicOrange : NSColor.labelColor
-                let weeklyColor: NSColor = (weekly == 0 || weekly >= 80) ? anthropicOrange : NSColor.labelColor
+                    let fiveHourColor: NSColor = (fiveHour == 0 || fiveHour >= 90) ? anthropicOrange : NSColor.labelColor
+                    let weeklyColor: NSColor = (weekly == 0 || weekly >= 80) ? anthropicOrange : NSColor.labelColor
 
-                let fiveHourItem = NSMenuItem(title: "  5h: \(fiveHour)%  \u{2022}  \(fiveHourReset)", action: nil, keyEquivalent: "")
-                fiveHourItem.isEnabled = false
-                let fiveHourAttrs: [NSAttributedString.Key: Any] = [
-                    .font: NSFont.systemFont(ofSize: 11, weight: .regular)
-                ]
-                let fiveHourString = NSMutableAttributedString(string: "  5h: ", attributes: fiveHourAttrs)
-                fiveHourString.append(NSAttributedString(string: "\(fiveHour)", attributes: [
-                    .font: NSFont.systemFont(ofSize: 11, weight: .medium),
-                    .foregroundColor: fiveHourColor
-                ]))
-                fiveHourString.append(NSAttributedString(string: "%  \u{2022}  \(fiveHourReset)", attributes: fiveHourAttrs))
-                fiveHourItem.attributedTitle = fiveHourString
-                menu.addItem(fiveHourItem)
+                    let fiveHourItem = NSMenuItem(title: "  5h: \(fiveHour)%  \u{2022}  \(fiveHourReset)", action: nil, keyEquivalent: "")
+                    fiveHourItem.isEnabled = false
+                    let fiveHourAttrs: [NSAttributedString.Key: Any] = [
+                        .font: NSFont.systemFont(ofSize: 11, weight: .regular)
+                    ]
+                    let fiveHourString = NSMutableAttributedString(string: "  5h: ", attributes: fiveHourAttrs)
+                    fiveHourString.append(NSAttributedString(string: "\(fiveHour)", attributes: [
+                        .font: NSFont.systemFont(ofSize: 11, weight: .medium),
+                        .foregroundColor: fiveHourColor
+                    ]))
+                    fiveHourString.append(NSAttributedString(string: "%  \u{2022}  \(fiveHourReset)", attributes: fiveHourAttrs))
+                    fiveHourItem.attributedTitle = fiveHourString
+                    menu.addItem(fiveHourItem)
 
-                let weeklyItem = NSMenuItem(title: "  7d: \(weekly)%  \u{2022}  \(weeklyReset)", action: nil, keyEquivalent: "")
-                weeklyItem.isEnabled = false
-                let weeklyAttrs: [NSAttributedString.Key: Any] = [
-                    .font: NSFont.systemFont(ofSize: 11, weight: .regular)
-                ]
-                let weeklyString = NSMutableAttributedString(string: "  7d: ", attributes: weeklyAttrs)
-                weeklyString.append(NSAttributedString(string: "\(weekly)", attributes: [
-                    .font: NSFont.systemFont(ofSize: 11, weight: .medium),
-                    .foregroundColor: weeklyColor
-                ]))
-                weeklyString.append(NSAttributedString(string: "%  \u{2022}  \(weeklyReset)", attributes: weeklyAttrs))
-                weeklyItem.attributedTitle = weeklyString
-                menu.addItem(weeklyItem)
+                    let weeklyItem = NSMenuItem(title: "  7d: \(weekly)%  \u{2022}  \(weeklyReset)", action: nil, keyEquivalent: "")
+                    weeklyItem.isEnabled = false
+                    let weeklyAttrs: [NSAttributedString.Key: Any] = [
+                        .font: NSFont.systemFont(ofSize: 11, weight: .regular)
+                    ]
+                    let weeklyString = NSMutableAttributedString(string: "  7d: ", attributes: weeklyAttrs)
+                    weeklyString.append(NSAttributedString(string: "\(weekly)", attributes: [
+                        .font: NSFont.systemFont(ofSize: 11, weight: .medium),
+                        .foregroundColor: weeklyColor
+                    ]))
+                    weeklyString.append(NSAttributedString(string: "%  \u{2022}  \(weeklyReset)", attributes: weeklyAttrs))
+                    weeklyItem.attributedTitle = weeklyString
+                    menu.addItem(weeklyItem)
 
+                    if let claudeError = viewModel.claudeError {
+                        menu.addItem(makeStatusMessageItem(claudeError, color: .systemOrange))
+                        if shouldPromptClaudeAuthentication {
+                            let authItem = NSMenuItem(title: "Authenticate Claude…", action: #selector(authenticateClaude), keyEquivalent: "")
+                            authItem.target = self
+                            menu.addItem(authItem)
+                        }
+                    }
+                } else {
+                    menu.addItem(makeStatusMessageItem("Not authenticated", color: .secondaryLabelColor))
+                    let authItem = NSMenuItem(title: "Authenticate Claude…", action: #selector(authenticateClaude), keyEquivalent: "")
+                    authItem.target = self
+                    menu.addItem(authItem)
+                }
             }
 
             // Codex usage section
-            if hasCodex && viewModel.showCodex {
-                if hasClaude && viewModel.showClaude {
+            if viewModel.showCodex {
+                if viewModel.showClaude {
                     menu.addItem(NSMenuItem.separator())
                 }
 
@@ -301,41 +311,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 codexHeader.attributedTitle = headerString
                 menu.addItem(codexHeader)
 
-                let primaryLabel = codex.primaryWindowLabel
-                let primary = codex.primaryUsedPercent
-                let primaryReset = codex.timeUntilPrimaryReset
+                if hasCodex {
+                    let primaryLabel = codex.primaryWindowLabel
+                    let primary = codex.primaryUsedPercent
+                    let primaryReset = codex.timeUntilPrimaryReset
 
-                let primaryColor: NSColor = (primary == 0 || primary >= 90) ? codexBlue : NSColor.labelColor
+                    let primaryColor: NSColor = (primary == 0 || primary >= 90) ? codexBlue : NSColor.labelColor
 
-                let primaryItem = NSMenuItem(title: "  \(primaryLabel): \(primary)%  \u{2022}  \(primaryReset)", action: nil, keyEquivalent: "")
-                primaryItem.isEnabled = false
-                let primaryAttrs: [NSAttributedString.Key: Any] = [
-                    .font: NSFont.systemFont(ofSize: 11, weight: .regular)
-                ]
-                let primaryString = NSMutableAttributedString(string: "  \(primaryLabel): ", attributes: primaryAttrs)
-                primaryString.append(NSAttributedString(string: "\(primary)", attributes: [
-                    .font: NSFont.systemFont(ofSize: 11, weight: .medium),
-                    .foregroundColor: primaryColor
-                ]))
-                primaryString.append(NSAttributedString(string: "%  \u{2022}  \(primaryReset)", attributes: primaryAttrs))
-                primaryItem.attributedTitle = primaryString
-                menu.addItem(primaryItem)
-
-                if codex.secondaryUsedPercent > 0 || codex.secondaryResetAt != nil {
-                    let secondary = codex.secondaryUsedPercent
-                    let secondaryReset = codex.timeUntilSecondaryReset
-                    let secondaryColor: NSColor = (secondary == 0 || secondary >= 80) ? codexBlue : NSColor.labelColor
-
-                    let secondaryItem = NSMenuItem(title: "  7d: \(secondary)%  \u{2022}  \(secondaryReset)", action: nil, keyEquivalent: "")
-                    secondaryItem.isEnabled = false
-                    let secondaryString = NSMutableAttributedString(string: "  7d: ", attributes: primaryAttrs)
-                    secondaryString.append(NSAttributedString(string: "\(secondary)", attributes: [
+                    let primaryItem = NSMenuItem(title: "  \(primaryLabel): \(primary)%  \u{2022}  \(primaryReset)", action: nil, keyEquivalent: "")
+                    primaryItem.isEnabled = false
+                    let primaryAttrs: [NSAttributedString.Key: Any] = [
+                        .font: NSFont.systemFont(ofSize: 11, weight: .regular)
+                    ]
+                    let primaryString = NSMutableAttributedString(string: "  \(primaryLabel): ", attributes: primaryAttrs)
+                    primaryString.append(NSAttributedString(string: "\(primary)", attributes: [
                         .font: NSFont.systemFont(ofSize: 11, weight: .medium),
-                        .foregroundColor: secondaryColor
+                        .foregroundColor: primaryColor
                     ]))
-                    secondaryString.append(NSAttributedString(string: "%  \u{2022}  \(secondaryReset)", attributes: primaryAttrs))
-                    secondaryItem.attributedTitle = secondaryString
-                    menu.addItem(secondaryItem)
+                    primaryString.append(NSAttributedString(string: "%  \u{2022}  \(primaryReset)", attributes: primaryAttrs))
+                    primaryItem.attributedTitle = primaryString
+                    menu.addItem(primaryItem)
+
+                    if codex.secondaryUsedPercent > 0 || codex.secondaryResetAt != nil {
+                        let secondary = codex.secondaryUsedPercent
+                        let secondaryReset = codex.timeUntilSecondaryReset
+                        let secondaryColor: NSColor = (secondary == 0 || secondary >= 80) ? codexBlue : NSColor.labelColor
+
+                        let secondaryItem = NSMenuItem(title: "  7d: \(secondary)%  \u{2022}  \(secondaryReset)", action: nil, keyEquivalent: "")
+                        secondaryItem.isEnabled = false
+                        let secondaryString = NSMutableAttributedString(string: "  7d: ", attributes: primaryAttrs)
+                        secondaryString.append(NSAttributedString(string: "\(secondary)", attributes: [
+                            .font: NSFont.systemFont(ofSize: 11, weight: .medium),
+                            .foregroundColor: secondaryColor
+                        ]))
+                        secondaryString.append(NSAttributedString(string: "%  \u{2022}  \(secondaryReset)", attributes: primaryAttrs))
+                        secondaryItem.attributedTitle = secondaryString
+                        menu.addItem(secondaryItem)
+                    }
+
+                    if let codexError = viewModel.codexError {
+                        menu.addItem(makeStatusMessageItem(codexError, color: .systemOrange))
+                        if shouldPromptCodexAuthentication {
+                            let authItem = NSMenuItem(title: "How to authenticate Codex", action: #selector(authenticateCodex), keyEquivalent: "")
+                            authItem.target = self
+                            menu.addItem(authItem)
+                        }
+                    }
+                } else {
+                    menu.addItem(makeStatusMessageItem("Not authenticated", color: .secondaryLabelColor))
+                    let authItem = NSMenuItem(title: "How to authenticate Codex", action: #selector(authenticateCodex), keyEquivalent: "")
+                    authItem.target = self
+                    menu.addItem(authItem)
                 }
             }
 
@@ -528,8 +554,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func refreshData() {
         Task {
-            await viewModel.refresh()
+            await viewModel.rediscoverCredentialsAndRefresh()
         }
+    }
+
+    @objc private func authenticateClaude() {
+        showCredentialsWindow()
+    }
+
+    @objc private func authenticateCodex() {
+        presentAlert(
+            title: "Authenticate Codex",
+            message: "Run `codex login` in Terminal, then click Refresh in JustaUsageBar.",
+            style: .informational
+        )
     }
 
     @objc private func showBoth() {
@@ -885,8 +923,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         providerSwitchTimer = Timer.scheduledTimer(withTimeInterval: viewModel.animationInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.beginTransition()
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let nextProvider: DisplayProvider = (self.currentProvider == .claude) ? .codex : .claude
+                self.setCurrentProvider(nextProvider, persistPreference: false)
+                self.updateStatusImage()
             }
         }
     }
@@ -894,10 +935,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func stopProviderAnimation() {
         providerSwitchTimer?.invalidate()
         providerSwitchTimer = nil
-        transitionTimer?.invalidate()
-        transitionTimer = nil
-        isTransitioning = false
-        transitionProgress = 0
     }
 
     private func restartProviderAnimation() {
@@ -918,9 +955,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        promoAnimationTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 15.0, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                guard let self = self else { return }
+        promoAnimationTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
 
                 guard self.viewModel.shouldShowCodexPromo || self.viewModel.shouldShowClaudePeakIndicator else {
                     self.stopPromoAnimation()
@@ -928,7 +965,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     return
                 }
 
-                self.promoAnimationPhase = (self.promoAnimationPhase + 0.045).truncatingRemainder(dividingBy: 1.0)
+                self.promoAnimationPhase = (self.promoAnimationPhase + 0.0225).truncatingRemainder(dividingBy: 1.0)
                 let currentSlot = Int(Date().timeIntervalSinceReferenceDate / 2.0)
                 if self.lastPromoHeaderSlot != currentSlot {
                     self.lastPromoHeaderSlot = currentSlot
@@ -936,11 +973,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.rebuildMenu()
                 }
 
-                if self.isTransitioning {
-                    self.renderTransitionFrame()
-                } else if self.currentProvider == .codex || self.currentProvider == .claude {
-                    self.updateStatusImage()
-                }
+                self.updateStatusImage()
             }
         }
     }
@@ -959,99 +992,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func beginTransition() {
-        guard !isTransitioning else { return }
-        guard viewModel.shouldAnimateProviders else { return }
-
-        isTransitioning = true
-        transitionProgress = 0
-
-        let totalFrames: CGFloat = 20
-        let frameDuration: TimeInterval = 1.0 / 60.0
-
-        transitionTimer = Timer.scheduledTimer(withTimeInterval: frameDuration, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                guard let self = self else { return }
-
-                self.transitionProgress += 1.0 / totalFrames
-
-                if self.transitionProgress >= 1.0 {
-                    self.transitionProgress = 1.0
-                    self.transitionTimer?.invalidate()
-                    self.transitionTimer = nil
-                    self.isTransitioning = false
-                    self.setCurrentProvider((self.currentProvider == .claude) ? .codex : .claude, persistPreference: false)
-                    self.updateStatusImage()
-                } else {
-                    self.renderTransitionFrame()
-                }
-            }
-        }
-    }
-
-    private func renderTransitionFrame() {
-        guard let button = statusItem.button else { return }
-
-        let fromProvider = currentProvider
-        let toProvider: DisplayProvider = (currentProvider == .claude) ? .codex : .claude
-
-        let (fromImage, fromWidth) = createProviderImage(for: fromProvider)
-        let (toImage, toWidth) = createProviderImage(for: toProvider)
-
-        let maxWidth = max(fromWidth, toWidth)
-        let height: CGFloat = viewModel.showIcon ? 22 : 16
-
-        let progress = transitionProgress
-
-        let image = NSImage(size: NSSize(width: maxWidth, height: height))
-        image.lockFocus()
-
-        // Smooth easing function (ease in-out)
-        let eased = progress < 0.5
-            ? 2 * progress * progress
-            : 1 - pow(-2 * progress + 2, 2) / 2
-
-        if eased < 0.5 {
-            // Phase 1: Current slides out to the left and fades
-            let phaseProgress = eased / 0.5
-            let xOffset = -(phaseProgress * maxWidth * 0.6)
-            let alpha = 1.0 - phaseProgress
-
-            fromImage.draw(
-                in: NSRect(x: xOffset, y: 0, width: fromWidth, height: height),
-                from: NSRect(origin: .zero, size: fromImage.size),
-                operation: .sourceOver,
-                fraction: alpha
-            )
-        } else {
-            // Phase 2: New slides in from the left and fades in
-            let phaseProgress = (eased - 0.5) / 0.5
-            let xOffset = -(1.0 - phaseProgress) * maxWidth * 0.6
-            let alpha = phaseProgress
-
-            toImage.draw(
-                in: NSRect(x: xOffset, y: 0, width: toWidth, height: height),
-                from: NSRect(origin: .zero, size: toImage.size),
-                operation: .sourceOver,
-                fraction: alpha
-            )
-        }
-
-        image.unlockFocus()
-        image.isTemplate = false
-
-        if lastStatusLength != maxWidth {
-            lastStatusLength = maxWidth
-            statusItem.length = maxWidth
-        }
-        button.image = image
-        button.toolTip = statusTooltip(for: currentProvider)
-    }
-
     // MARK: - Status Bar Image
 
     private func updateStatusImage() {
-        guard !isTransitioning else { return }
         guard let button = statusItem.button else { return }
         syncCurrentProvider()
 
@@ -1370,6 +1313,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private var shouldPromptClaudeAuthentication: Bool {
+        !viewModel.hasClaudeCredentials || viewModel.claudeError != nil
+    }
+
+    private var shouldPromptCodexAuthentication: Bool {
+        !viewModel.hasCodexCredentials || viewModel.codexError == APIError.unauthorized.errorDescription
+    }
+
+    private func makeStatusMessageItem(_ title: String, color: NSColor) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.isEnabled = false
+        item.attributedTitle = NSAttributedString(string: "  \(title)", attributes: [
+            .font: NSFont.systemFont(ofSize: 10, weight: .regular),
+            .foregroundColor: color
+        ])
+        return item
+    }
+
     private func getDarkMode() -> Bool {
         if let button = statusItem.button {
             return button.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
@@ -1384,7 +1345,6 @@ struct CredentialsView: View {
     let onSave: (String, String) -> Void
 
     @State private var showManualEntry = false
-    @State private var showBrowserAuth = false
     @State private var sessionKey = ""
     @State private var organizationId = ""
 
@@ -1408,7 +1368,7 @@ struct CredentialsView: View {
                     HStack {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundColor(.green)
-                        Text("Claude CLI detected")
+                        Text("Claude detected")
                             .font(.caption)
                         Spacer()
                     }
@@ -1419,7 +1379,7 @@ struct CredentialsView: View {
                     HStack {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundColor(.green)
-                        Text("Codex CLI detected")
+                        Text("Codex detected")
                             .font(.caption)
                         Spacer()
                     }
@@ -1428,24 +1388,37 @@ struct CredentialsView: View {
             }
 
             if ClaudeOAuthService.shared.hasCredentials || CodexAPIService.shared.hasCredentials {
-                Button(action: {
-                    // Use auto-detected credentials — trigger refresh
-                    // Pass empty strings to signal OAuth mode
+                VStack(spacing: 10) {
                     if ClaudeOAuthService.shared.hasCredentials {
-                        // OAuth doesn't need session key / org ID
-                        // Just dismiss and let the app refresh
-                        onSave("__oauth__", "__oauth__")
+                        Button(action: {
+                            onSave("__oauth__", "__oauth__")
+                        }) {
+                            HStack {
+                                Image(systemName: "sparkles")
+                                Text("Use Claude Detected Credentials")
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(anthropicOrange)
                     }
-                }) {
-                    HStack {
-                        Image(systemName: "bolt.fill")
-                        Text("Use Detected Credentials")
+
+                    if CodexAPIService.shared.hasCredentials {
+                        Button(action: {
+                            onSave("__detected_codex__", "__detected_codex__")
+                        }) {
+                            HStack {
+                                Image(systemName: "terminal")
+                                Text("Use Codex Detected Credentials")
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(anthropicOrange)
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.green)
 
                 Divider()
                     .padding(.vertical, 4)
@@ -1454,24 +1427,9 @@ struct CredentialsView: View {
             if !showManualEntry {
                 Spacer()
                 VStack(spacing: 16) {
-                    Text("Sign in to Claude")
+                    Text("Manual Claude setup")
                         .font(.subheadline)
                         .fontWeight(.medium)
-
-                    Button(action: { showBrowserAuth = true }) {
-                        HStack {
-                            Image(systemName: "globe")
-                            Text("Sign in with Browser")
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(anthropicOrange)
-
-                    Text("Recommended - auto-extracts credentials")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
 
                     Divider()
                         .padding(.vertical, 4)
@@ -1551,10 +1509,5 @@ struct CredentialsView: View {
         }
         .padding()
         .frame(width: 300, height: 400)
-        .sheet(isPresented: $showBrowserAuth) {
-            AuthWindowView { sk, org in
-                onSave(sk, org)
-            }
-        }
     }
 }

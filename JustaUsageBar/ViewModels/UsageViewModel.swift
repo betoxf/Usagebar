@@ -28,7 +28,7 @@ final class UsageViewModel: ObservableObject {
     @Published var isLoading: Bool = false
     @Published var error: String?
     @Published var lastUpdated: Date?
-    @Published var refreshInterval: TimeInterval = 60
+    @Published var refreshInterval: TimeInterval = 120
 
     // MARK: - Display Settings (persisted)
 
@@ -73,7 +73,9 @@ final class UsageViewModel: ObservableObject {
     private init() {
         // Auto-detect credentials on launch
         detectCredentials()
-        startAutoRefresh()
+        if hasCredentials {
+            startAutoRefresh()
+        }
 
         // Enable Launch at Login on first launch
         if !hasLaunchedBefore {
@@ -85,11 +87,9 @@ final class UsageViewModel: ObservableObject {
     // MARK: - Credential Detection
 
     func detectCredentials() {
-        // Claude: match CodexBar app order: OAuth, then CLI, then web session.
+        // Claude: check OAuth first, then web session.
         if ClaudeOAuthService.shared.hasCredentials {
             claudeAuthSource = .oauth
-        } else if ClaudeCLIService.shared.isAvailable {
-            claudeAuthSource = .cli
         } else if CredentialStorage.shared.hasCredentials {
             claudeAuthSource = .webSession
         } else {
@@ -104,6 +104,7 @@ final class UsageViewModel: ObservableObject {
 
     func refresh() async {
         guard !isLoading else { return }
+        guard hasCredentials else { return }
 
         isLoading = true
         error = nil
@@ -116,6 +117,20 @@ final class UsageViewModel: ObservableObject {
         lastUpdated = Date()
         isLoading = false
         NotificationCenter.default.post(name: NSNotification.Name("UsageDataChanged"), object: nil)
+    }
+
+    func rediscoverCredentialsAndRefresh() async {
+        ClaudeOAuthService.shared.clearCache()
+        CodexAPIService.shared.clearCache()
+        detectCredentials()
+
+        if hasCredentials {
+            startAutoRefresh()
+            await refresh()
+        } else {
+            lastUpdated = Date()
+            NotificationCenter.default.post(name: NSNotification.Name("UsageDataChanged"), object: nil)
+        }
     }
 
     private func refreshClaude() async {
@@ -160,6 +175,10 @@ final class UsageViewModel: ObservableObject {
     func startAutoRefresh() {
         stopAutoRefresh()
 
+        guard hasCredentials else {
+            return
+        }
+
         refreshTask = Task {
             await refresh()
         }
@@ -190,7 +209,7 @@ final class UsageViewModel: ObservableObject {
     }
 
     var hasClaudeCredentials: Bool {
-        ClaudeOAuthService.shared.hasCredentials || ClaudeCLIService.shared.isAvailable || CredentialStorage.shared.hasCredentials
+        ClaudeOAuthService.shared.hasCredentials || CredentialStorage.shared.hasCredentials
     }
 
     var hasCodexCredentials: Bool {
@@ -291,9 +310,10 @@ final class UsageViewModel: ObservableObject {
     }
 
     func saveCredentials(sessionKey: String, organizationId: String) {
-        // "__oauth__" is a sentinel from auto-detect — no web session to save
-        if sessionKey == "__oauth__" {
+        // "__oauth__" / "__detected__*" are sentinels from auto-detect.
+        if sessionKey == "__oauth__" || sessionKey.hasPrefix("__detected__") {
             detectCredentials()
+            startAutoRefresh()
             Task { await refresh() }
             return
         }
@@ -301,6 +321,7 @@ final class UsageViewModel: ObservableObject {
         CredentialStorage.shared.sessionKey = sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
         CredentialStorage.shared.organizationId = organizationId.trimmingCharacters(in: .whitespacesAndNewlines)
         claudeAuthSource = .webSession
+        startAutoRefresh()
 
         Task {
             await refresh()
@@ -313,12 +334,18 @@ final class UsageViewModel: ObservableObject {
         claudeAuthSource = .none
         usageData = .placeholder
         claudeError = nil
+        if !hasCredentials {
+            stopAutoRefresh()
+        }
     }
 
     func clearCodexCredentials() {
         CodexAPIService.shared.clearCache()
         codexUsageData = .placeholder
         codexError = nil
+        if !hasCredentials {
+            stopAutoRefresh()
+        }
     }
 
     func clearCredentials() {

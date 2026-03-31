@@ -46,13 +46,11 @@ struct UsageData {
     var fiveHourUsed: Int = 0
     var fiveHourLimit: Int = 100
     var fiveHourResetAt: Date?
-    var fiveHourResetDescription: String?
 
     // Weekly limit
     var weeklyUsed: Int = 0
     var weeklyLimit: Int = 100
     var weeklyResetAt: Date?
-    var weeklyResetDescription: String?
 
     var fiveHourPercentage: Double {
         guard fiveHourLimit > 0 else { return 0 }
@@ -65,17 +63,13 @@ struct UsageData {
     }
 
     var timeUntilFiveHourReset: String {
-        if let resetAt = fiveHourResetAt {
-            return formatTimeUntil(resetAt)
-        }
-        return fiveHourResetDescription ?? "--"
+        guard let resetAt = fiveHourResetAt else { return "--" }
+        return formatTimeUntil(resetAt)
     }
 
     var timeUntilWeeklyReset: String {
-        if let resetAt = weeklyResetAt {
-            return formatTimeUntil(resetAt)
-        }
-        return weeklyResetDescription ?? "--"
+        guard let resetAt = weeklyResetAt else { return "--" }
+        return formatTimeUntil(resetAt)
     }
 
     private func formatTimeUntil(_ date: Date) -> String {

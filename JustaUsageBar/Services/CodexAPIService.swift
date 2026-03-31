@@ -69,13 +69,18 @@ final class CodexAPIService {
     }
 
     private var cachedCredentials: CodexCredentials?
+    private var lastCredentialCheck: Date?
+    private let credentialCacheTTL: TimeInterval = 300
 
     private init() {}
 
     // MARK: - Credential Discovery
 
     func loadCredentials() -> CodexCredentials? {
-        if let cached = cachedCredentials { return cached }
+        if let lastCredentialCheck,
+           Date().timeIntervalSince(lastCredentialCheck) < credentialCacheTTL {
+            return cachedCredentials
+        }
 
         let homeDir = FileManager.default.homeDirectoryForCurrentUser
         let codexHome = ProcessInfo.processInfo.environment["CODEX_HOME"]
@@ -87,6 +92,8 @@ final class CodexAPIService {
         guard FileManager.default.fileExists(atPath: authPath.path),
               let data = try? Data(contentsOf: authPath),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            cachedCredentials = nil
+            lastCredentialCheck = Date()
             return nil
         }
 
@@ -94,6 +101,7 @@ final class CodexAPIService {
         if let apiKey = json["OPENAI_API_KEY"] as? String {
             let creds = CodexCredentials(accessToken: apiKey, isApiKey: true)
             cachedCredentials = creds
+            lastCredentialCheck = Date()
             return creds
         }
 
@@ -115,9 +123,12 @@ final class CodexAPIService {
                 lastRefresh: lastRefresh
             )
             cachedCredentials = creds
+            lastCredentialCheck = Date()
             return creds
         }
 
+        cachedCredentials = nil
+        lastCredentialCheck = Date()
         return nil
     }
 
@@ -127,6 +138,7 @@ final class CodexAPIService {
 
     func clearCache() {
         cachedCredentials = nil
+        lastCredentialCheck = nil
     }
 
     // MARK: - Fetch Usage
@@ -169,10 +181,6 @@ final class CodexAPIService {
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw APIError.unknown(0)
-        }
-
-        if let jsonString = String(data: data, encoding: .utf8) {
-            print("Codex API Response (\(httpResponse.statusCode)): \(jsonString.prefix(500))")
         }
 
         switch httpResponse.statusCode {

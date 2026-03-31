@@ -14,6 +14,7 @@ final class ClaudeOAuthService {
     private let oauthClientId = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
     private let tokenEndpoint = "https://platform.claude.com/v1/oauth/token"
     private let usageEndpoint = "https://api.anthropic.com/api/oauth/usage"
+    private let oauthUserAgent = "claude-code/2.1.0"
     private let claudeKeychainService = "Claude Code-credentials"
     private let securityBinaryPath = "/usr/bin/security"
     private let securityCLIReadTimeout: TimeInterval = 1.5
@@ -34,11 +35,9 @@ final class ClaudeOAuthService {
     // MARK: - Credential Discovery
 
     func loadCredentials() -> OAuthCredentials? {
-        // Return cache if fresh
-        if let cached = cachedCredentials,
-           let lastCheck = lastCredentialCheck,
+        if let lastCheck = lastCredentialCheck,
            Date().timeIntervalSince(lastCheck) < cacheTTL {
-            return cached
+            return cachedCredentials
         }
 
         // 1. Try Keychain directly first. On many machines Claude stores credentials
@@ -64,6 +63,8 @@ final class ClaudeOAuthService {
             return creds
         }
 
+        cachedCredentials = nil
+        lastCredentialCheck = Date()
         return nil
     }
 
@@ -240,16 +241,12 @@ final class ClaudeOAuthService {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
-        request.setValue(ClaudeCLIService.shared.oauthUserAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue(oauthUserAgent, forHTTPHeaderField: "User-Agent")
 
         let (data, response) = try await URLSession.shared.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw APIError.unknown(0)
-        }
-
-        if let jsonString = String(data: data, encoding: .utf8) {
-            print("OAuth API Response (\(httpResponse.statusCode)): \(jsonString.prefix(500))")
         }
 
         switch httpResponse.statusCode {

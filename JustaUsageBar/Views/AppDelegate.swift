@@ -186,7 +186,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let anthropicOrange = NSColor(red: 0.83, green: 0.53, blue: 0.30, alpha: 1.0)
 
                 // Build header with auth method
-                let authMethod = viewModel.claudeAuthSource == .oauth ? "via CLI" : "via Browser"
+                let authMethod: String = switch viewModel.claudeAuthSource {
+                case .oauth:
+                    "via OAuth"
+                case .cli:
+                    "via CLI"
+                case .webSession:
+                    "via Browser"
+                case .none:
+                    ""
+                }
                 let peakLabel = viewModel.shouldShowClaudePeakIndicator ? "  ↓ Peak hour" : ""
 
                 let headerString = NSMutableAttributedString()

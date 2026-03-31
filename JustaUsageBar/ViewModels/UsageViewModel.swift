@@ -85,9 +85,11 @@ final class UsageViewModel: ObservableObject {
     // MARK: - Credential Detection
 
     func detectCredentials() {
-        // Claude: check OAuth first, then web session
+        // Claude: match CodexBar app order: OAuth, then CLI, then web session.
         if ClaudeOAuthService.shared.hasCredentials {
             claudeAuthSource = .oauth
+        } else if ClaudeCLIService.shared.isAvailable {
+            claudeAuthSource = .cli
         } else if CredentialStorage.shared.hasCredentials {
             claudeAuthSource = .webSession
         } else {
@@ -188,7 +190,7 @@ final class UsageViewModel: ObservableObject {
     }
 
     var hasClaudeCredentials: Bool {
-        ClaudeOAuthService.shared.hasCredentials || CredentialStorage.shared.hasCredentials
+        ClaudeOAuthService.shared.hasCredentials || ClaudeCLIService.shared.isAvailable || CredentialStorage.shared.hasCredentials
     }
 
     var hasCodexCredentials: Bool {

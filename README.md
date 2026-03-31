@@ -98,11 +98,16 @@ During Anthropic weekday peak hours, Claude can show an animated downward indica
 
 The app auto-detects credentials on launch:
 
-**Claude CLI** -- reads `~/.claude/.credentials.json`
+**Claude CLI** -- reads Claude OAuth credentials from the macOS Keychain item `Claude Code-credentials`, with `~/.claude/.credentials.json` as a fallback on setups that still write the file
 ```bash
 # If you haven't already:
 npm install -g @anthropic-ai/claude-code
 claude login
+```
+
+To verify Claude is logged in and the Keychain item exists:
+```bash
+security find-generic-password -s "Claude Code-credentials"
 ```
 
 **Codex CLI** -- reads `~/.codex/auth.json`
@@ -135,7 +140,7 @@ codex login
 
 | Priority | Method | Source | Auto-refresh |
 |----------|--------|--------|-------------|
-| 1 | Claude OAuth | `~/.claude/.credentials.json` or Keychain | Yes |
+| 1 | Claude OAuth | Keychain `Claude Code-credentials` or `~/.claude/.credentials.json` | Yes |
 | 2 | Claude Web Session | Browser cookie extraction | No |
 | 3 | Codex OAuth | `~/.codex/auth.json` | Yes |
 
@@ -160,9 +165,10 @@ Usage refreshes every 60 seconds. OAuth tokens refresh automatically when expire
 
 | Problem | Fix |
 |---------|-----|
-| "Session expired" (Claude) | Install Claude CLI + `claude login`, or Sign Out > re-authenticate via browser |
+| "Session expired" (Claude) | Run `claude login`, then verify `security find-generic-password -s "Claude Code-credentials"` returns an item; if not, sign out and authenticate again |
 | Codex not showing | Run `codex login`, verify `~/.codex/auth.json` exists |
-| Usage shows 0% | Click Refresh (Cmd+R) or wait for next auto-refresh |
+| Claude shows `0%` or `--` after restart | Click Refresh (Cmd+R). If it stays stale, run `claude login` again and confirm the `Claude Code-credentials` Keychain item exists |
+| Usage shows 0% | Click Refresh (Cmd+R) or wait for next auto-refresh. Very low usage can legitimately show `0%` for the weekly window |
 | Not starting at login | Toggle "Launch at Login" in menu, or check System Settings > Login Items |
 
 ## Build from Source
@@ -177,7 +183,7 @@ make release
 ## Privacy & Security
 
 - All credentials stored locally (AES-256-GCM encrypted, machine-locked)
-- OAuth credentials read directly from CLI config files (not copied)
+- OAuth credentials read locally from CLI-managed auth stores (Claude Keychain or CLI files, not copied to a server)
 - No telemetry, no analytics, no third-party services
 - Not affiliated with Anthropic or OpenAI
 - Open source (MIT)

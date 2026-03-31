@@ -14,6 +14,9 @@ final class ClaudeOAuthService {
     private let oauthClientId = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
     private let tokenEndpoint = "https://platform.claude.com/v1/oauth/token"
     private let usageEndpoint = "https://api.anthropic.com/api/oauth/usage"
+    private let claudeKeychainService = "Claude Code-credentials"
+    private let securityBinaryPath = "/usr/bin/security"
+    private let securityCLIReadTimeout: TimeInterval = 1.5
 
     private var cachedCredentials: OAuthCredentials?
     private var lastCredentialCheck: Date?
@@ -38,15 +41,24 @@ final class ClaudeOAuthService {
             return cached
         }
 
-        // 1. Try credentials file (~/.claude/.credentials.json)
-        if let creds = readCredentialsFile() {
+        // 1. Try Keychain directly first. On many machines Claude stores credentials
+        // only in Keychain, and the item is fresher than any file fallback.
+        if let creds = readFromKeychain() {
             cachedCredentials = creds
             lastCredentialCheck = Date()
             return creds
         }
 
-        // 2. Try Keychain (Claude CLI's entry)
-        if let creds = readFromKeychain() {
+        // 2. Fall back to the security CLI. This is more resilient after restarts
+        // when a direct Keychain read from a GUI app is flaky.
+        if let creds = readFromKeychainUsingSecurityCLI() {
+            cachedCredentials = creds
+            lastCredentialCheck = Date()
+            return creds
+        }
+
+        // 3. Try credentials file (~/.claude/.credentials.json)
+        if let creds = readCredentialsFile() {
             cachedCredentials = creds
             lastCredentialCheck = Date()
             return creds
@@ -98,7 +110,7 @@ final class ClaudeOAuthService {
     private func readFromKeychain() -> OAuthCredentials? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "Claude Code-credentials",
+            kSecAttrService as String: claudeKeychainService,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
@@ -109,6 +121,76 @@ final class ClaudeOAuthService {
         guard status == errSecSuccess,
               let data = result as? Data,
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let oauth = json["claudeAiOauth"] as? [String: Any],
+              let accessToken = oauth["accessToken"] as? String else {
+            return nil
+        }
+
+        let refreshToken = oauth["refreshToken"] as? String
+        var expiresAt: Date?
+        if let expiresMs = oauth["expiresAt"] as? Double {
+            expiresAt = Date(timeIntervalSince1970: expiresMs / 1000.0)
+        }
+        let scopes = oauth["scopes"] as? [String] ?? []
+
+        return OAuthCredentials(
+            accessToken: accessToken,
+            refreshToken: refreshToken,
+            expiresAt: expiresAt,
+            scopes: scopes
+        )
+    }
+
+    private func readFromKeychainUsingSecurityCLI() -> OAuthCredentials? {
+        guard FileManager.default.isExecutableFile(atPath: securityBinaryPath) else {
+            return nil
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: securityBinaryPath)
+        process.arguments = [
+            "find-generic-password",
+            "-s",
+            claudeKeychainService,
+            "-w",
+        ]
+
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+        process.standardInput = nil
+
+        do {
+            try process.run()
+        } catch {
+            return nil
+        }
+
+        let deadline = Date().addingTimeInterval(securityCLIReadTimeout)
+        while process.isRunning, Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+
+        if process.isRunning {
+            process.terminate()
+            return nil
+        }
+
+        guard process.terminationStatus == 0 else {
+            return nil
+        }
+
+        var data = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        while let last = data.last, last == 0x0A || last == 0x0D {
+            data.removeLast()
+        }
+
+        guard !data.isEmpty else {
+            return nil
+        }
+
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let oauth = json["claudeAiOauth"] as? [String: Any],
               let accessToken = oauth["accessToken"] as? String else {
             return nil
@@ -155,8 +237,10 @@ final class ClaudeOAuthService {
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.setValue("Bearer \(creds.accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
-        request.setValue("claude-code/1.0.0", forHTTPHeaderField: "User-Agent")
+        request.setValue(ClaudeCLIService.shared.oauthUserAgent, forHTTPHeaderField: "User-Agent")
 
         let (data, response) = try await URLSession.shared.data(for: request)
 
@@ -171,6 +255,8 @@ final class ClaudeOAuthService {
         switch httpResponse.statusCode {
         case 200:
             return try parseOAuthUsageResponse(data)
+        case 429:
+            throw APIError.rateLimited
         case 401, 403:
             // Try refresh once
             if let refreshToken = creds.refreshToken {

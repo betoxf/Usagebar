@@ -67,6 +67,10 @@ final class UsageViewModel: ObservableObject {
 
     private var refreshTask: Task<Void, Never>?
     private var timer: Timer?
+    private var hasObservedClaudeUsageSample = false
+    private var lastClaudeUsageChangeAt: Date?
+    private var hasObservedCodexUsageSample = false
+    private var lastCodexUsageChangeAt: Date?
 
     @AppStorage("hasLaunchedBefore") private var hasLaunchedBefore: Bool = false
 
@@ -141,6 +145,7 @@ final class UsageViewModel: ObservableObject {
 
         do {
             let data = try await ClaudeAPIService.shared.fetchUsage()
+            recordClaudeUsageActivityIfNeeded(newData: data)
             usageData = data
             claudeAuthSource = ClaudeAPIService.shared.lastAuthSource
             claudeError = nil
@@ -161,6 +166,7 @@ final class UsageViewModel: ObservableObject {
 
         do {
             let data = try await CodexAPIService.shared.fetchUsage()
+            recordCodexUsageActivityIfNeeded(newData: data)
             codexUsageData = data
             codexError = nil
         } catch let apiError as APIError {
@@ -251,6 +257,22 @@ final class UsageViewModel: ObservableObject {
         showPromoVisibility && isPromoVisibilityInWindow && showCodex && hasCodexCredentials
     }
 
+    var shouldAnimateClaudeUsageActivity: Bool {
+        guard let lastClaudeUsageChangeAt else {
+            return false
+        }
+
+        return Date().timeIntervalSince(lastClaudeUsageChangeAt) < usageActivityWindow
+    }
+
+    var shouldAnimateCodexUsageActivity: Bool {
+        guard let lastCodexUsageChangeAt else {
+            return false
+        }
+
+        return Date().timeIntervalSince(lastCodexUsageChangeAt) < usageActivityWindow
+    }
+
     private var claudePeakTimeZone: TimeZone {
         TimeZone(identifier: "America/Los_Angeles") ?? .current
     }
@@ -334,6 +356,8 @@ final class UsageViewModel: ObservableObject {
         claudeAuthSource = .none
         usageData = .placeholder
         claudeError = nil
+        hasObservedClaudeUsageSample = false
+        lastClaudeUsageChangeAt = nil
         if !hasCredentials {
             stopAutoRefresh()
         }
@@ -343,6 +367,8 @@ final class UsageViewModel: ObservableObject {
         CodexAPIService.shared.clearCache()
         codexUsageData = .placeholder
         codexError = nil
+        hasObservedCodexUsageSample = false
+        lastCodexUsageChangeAt = nil
         if !hasCredentials {
             stopAutoRefresh()
         }
@@ -376,6 +402,40 @@ final class UsageViewModel: ObservableObject {
             return .systemYellow
         } else {
             return .systemRed
+        }
+    }
+
+    private var usageActivityWindow: TimeInterval {
+        refreshInterval + 5
+    }
+
+    private func recordClaudeUsageActivityIfNeeded(newData: UsageData, now: Date = Date()) {
+        guard hasObservedClaudeUsageSample else {
+            hasObservedClaudeUsageSample = true
+            return
+        }
+
+        let didChange =
+            usageData.fiveHourUsed != newData.fiveHourUsed ||
+            usageData.weeklyUsed != newData.weeklyUsed
+
+        if didChange {
+            lastClaudeUsageChangeAt = now
+        }
+    }
+
+    private func recordCodexUsageActivityIfNeeded(newData: CodexUsageData, now: Date = Date()) {
+        guard hasObservedCodexUsageSample else {
+            hasObservedCodexUsageSample = true
+            return
+        }
+
+        let didChange =
+            codexUsageData.primaryUsedPercent != newData.primaryUsedPercent ||
+            codexUsageData.secondaryUsedPercent != newData.secondaryUsedPercent
+
+        if didChange {
+            lastCodexUsageChangeAt = now
         }
     }
 }

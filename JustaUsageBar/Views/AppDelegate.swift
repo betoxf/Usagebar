@@ -222,8 +222,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     let fiveHourReset = viewModel.usageData.timeUntilFiveHourReset
                     let weeklyReset = viewModel.usageData.timeUntilWeeklyReset
 
-                    let fiveHourColor: NSColor = (fiveHour == 0 || fiveHour >= 90) ? anthropicOrange : NSColor.labelColor
-                    let weeklyColor: NSColor = (weekly == 0 || weekly >= 80) ? anthropicOrange : NSColor.labelColor
+                    let fiveHourColor = usageHighlightColor(
+                        percentage: fiveHour,
+                        highThreshold: 90,
+                        accentColor: animatedClaudeAccentColor(),
+                        fallback: NSColor.labelColor
+                    )
+                    let weeklyColor = usageHighlightColor(
+                        percentage: weekly,
+                        highThreshold: 80,
+                        accentColor: animatedClaudeAccentColor(phaseShift: 0.14),
+                        fallback: NSColor.labelColor
+                    )
 
                     let fiveHourItem = NSMenuItem(title: "  5h: \(fiveHour)%  \u{2022}  \(fiveHourReset)", action: nil, keyEquivalent: "")
                     fiveHourItem.isEnabled = false
@@ -316,7 +326,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     let primary = codex.primaryUsedPercent
                     let primaryReset = codex.timeUntilPrimaryReset
 
-                    let primaryColor: NSColor = (primary == 0 || primary >= 90) ? codexBlue : NSColor.labelColor
+                    let primaryColor = usageHighlightColor(
+                        percentage: primary,
+                        highThreshold: 90,
+                        accentColor: animatedCodexAccentColor(),
+                        fallback: NSColor.labelColor
+                    )
 
                     let primaryItem = NSMenuItem(title: "  \(primaryLabel): \(primary)%  \u{2022}  \(primaryReset)", action: nil, keyEquivalent: "")
                     primaryItem.isEnabled = false
@@ -335,7 +350,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     if codex.secondaryUsedPercent > 0 || codex.secondaryResetAt != nil {
                         let secondary = codex.secondaryUsedPercent
                         let secondaryReset = codex.timeUntilSecondaryReset
-                        let secondaryColor: NSColor = (secondary == 0 || secondary >= 80) ? codexBlue : NSColor.labelColor
+                        let secondaryColor = usageHighlightColor(
+                            percentage: secondary,
+                            highThreshold: 80,
+                            accentColor: animatedCodexAccentColor(phaseShift: 0.14),
+                            fallback: NSColor.labelColor
+                        )
 
                         let secondaryItem = NSMenuItem(title: "  7d: \(secondary)%  \u{2022}  \(secondaryReset)", action: nil, keyEquivalent: "")
                         secondaryItem.isEnabled = false
@@ -948,7 +968,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func startPromoAnimation() {
         stopPromoAnimation()
 
-        guard viewModel.shouldShowCodexPromo || viewModel.shouldShowClaudePeakIndicator else {
+        guard shouldAnimateAnyAccentState else {
             promoAnimationPhase = 0
             promoHeaderShowsCountdown = true
             lastPromoHeaderSlot = nil
@@ -959,18 +979,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             MainActor.assumeIsolated {
                 guard let self else { return }
 
-                guard self.viewModel.shouldShowCodexPromo || self.viewModel.shouldShowClaudePeakIndicator else {
+                guard self.shouldAnimateAnyAccentState else {
                     self.stopPromoAnimation()
                     self.updateStatusImage()
                     return
                 }
 
                 self.promoAnimationPhase = (self.promoAnimationPhase + 0.0225).truncatingRemainder(dividingBy: 1.0)
-                let currentSlot = Int(Date().timeIntervalSinceReferenceDate / 2.0)
-                if self.lastPromoHeaderSlot != currentSlot {
-                    self.lastPromoHeaderSlot = currentSlot
-                    self.promoHeaderShowsCountdown = currentSlot.isMultiple(of: 2)
-                    self.rebuildMenu()
+                if self.shouldAnimateMenuMetadata {
+                    let currentSlot = Int(Date().timeIntervalSinceReferenceDate / 2.0)
+                    if self.lastPromoHeaderSlot != currentSlot {
+                        self.lastPromoHeaderSlot = currentSlot
+                        self.promoHeaderShowsCountdown = currentSlot.isMultiple(of: 2)
+                        self.rebuildMenu()
+                    }
                 }
 
                 self.updateStatusImage()
@@ -985,7 +1007,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func restartPromoAnimation() {
-        if viewModel.hasCredentials && (viewModel.shouldShowCodexPromo || viewModel.shouldShowClaudePeakIndicator) {
+        if viewModel.hasCredentials && shouldAnimateAnyAccentState {
             startPromoAnimation()
         } else {
             stopPromoAnimation()
@@ -1036,15 +1058,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         image.lockFocus()
 
         let isDarkMode = getDarkMode()
-        let anthropicOrange = NSColor(red: 0.83, green: 0.53, blue: 0.30, alpha: 1.0)
         let textColor = isDarkMode ? NSColor.white : NSColor(white: 0.25, alpha: 1.0)
 
         var yOffset: CGFloat = 0
 
         if showIcon {
+            let starColor = shouldAnimateClaudeBrandAccent
+                ? animatedClaudeAccentColor(phaseShift: 0.12)
+                : brandClaudeColor
             let starAttributes: [NSAttributedString.Key: Any] = [
                 .font: NSFont.systemFont(ofSize: 7, weight: .bold),
-                .foregroundColor: anthropicOrange
+                .foregroundColor: starColor
             ]
             let starString = NSAttributedString(string: "\u{2733}\u{FE0E}", attributes: starAttributes)
 
@@ -1067,8 +1091,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let fiveHour = viewModel.usageData.fiveHourUsed
         let weekly = viewModel.usageData.weeklyUsed
 
-        let fiveHourColor: NSColor = (fiveHour == 0 || fiveHour >= 90) ? anthropicOrange : textColor
-        let weeklyColor: NSColor = (weekly == 0 || weekly >= 80) ? anthropicOrange : textColor
+        let fiveHourColor = usageHighlightColor(
+            percentage: fiveHour,
+            highThreshold: 90,
+            accentColor: animatedClaudeAccentColor(),
+            fallback: textColor
+        )
+        let weeklyColor = usageHighlightColor(
+            percentage: weekly,
+            highThreshold: 80,
+            accentColor: animatedClaudeAccentColor(phaseShift: 0.14),
+            fallback: textColor
+        )
 
         let tinyLabelAttributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 6, weight: .regular),
@@ -1123,7 +1157,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )?.withSymbolConfiguration(symbolConfig) {
                 let tintedSymbol = arrowSymbol.copy() as? NSImage ?? arrowSymbol
                 tintedSymbol.lockFocus()
-                animatedClaudePeakColor().set()
+                animatedClaudeAccentColor(phaseShift: 0.34).set()
                 NSRect(origin: .zero, size: tintedSymbol.size).fill(using: .sourceAtop)
                 tintedSymbol.unlockFocus()
                 tintedSymbol.draw(in: NSRect(x: startX, y: badgeY, width: arrowSize.width, height: arrowSize.height))
@@ -1160,19 +1194,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let textColor = isDarkMode ? NSColor.white : NSColor(white: 0.25, alpha: 1.0)
         let codexBrandColor = isDarkMode ? NSColor.white : NSColor(white: 0.1, alpha: 1.0)
 
-        // Codex blue color for percentages
-        let codexBlue = NSColor(red: 0.1, green: 0.2, blue: 0.5, alpha: 1.0)
-
         var yOffset: CGFloat = 0
 
         if showIcon {
             // Draw icon and "Codex" label (no gradient, just black/white)
             let iconFont = NSFont.systemFont(ofSize: 6, weight: .regular)
             let iconString = ">_"
+            let codexIconColor = shouldAnimateCodexBrandAccent
+                ? animatedCodexAccentColor(phaseShift: 0.12)
+                : codexBrandColor
 
             let iconAttrs: [NSAttributedString.Key: Any] = [
                 .font: iconFont,
-                .foregroundColor: codexBrandColor
+                .foregroundColor: codexIconColor
             ]
             let codexIcon = NSAttributedString(string: iconString, attributes: iconAttrs)
 
@@ -1198,8 +1232,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let secondary = codex.secondaryUsedPercent
 
         // Use blue color for percentages based on usage
-        let primaryColor: NSColor = (primary == 0 || primary >= 90) ? codexBlue : textColor
-        let secondaryColor: NSColor = (secondary == 0 || secondary >= 80) ? codexBlue : textColor
+        let primaryColor = usageHighlightColor(
+            percentage: primary,
+            highThreshold: 90,
+            accentColor: animatedCodexAccentColor(),
+            fallback: textColor
+        )
+        let secondaryColor = usageHighlightColor(
+            percentage: secondary,
+            highThreshold: 80,
+            accentColor: animatedCodexAccentColor(phaseShift: 0.14),
+            fallback: textColor
+        )
 
         let tinyLabelAttributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 6, weight: .regular),
@@ -1244,11 +1288,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if showPromo {
             let promo2Attributes: [NSAttributedString.Key: Any] = [
                 .font: NSFont.systemFont(ofSize: 9, weight: .semibold),
-                .foregroundColor: animatedPromoColor(phaseShift: 0.08)
+                .foregroundColor: animatedCodexAccentColor(phaseShift: 0.08)
             ]
             let promoXAttributes: [NSAttributedString.Key: Any] = [
                 .font: NSFont.systemFont(ofSize: 9, weight: .bold),
-                .foregroundColor: animatedPromoColor(phaseShift: 0.2)
+                .foregroundColor: animatedCodexAccentColor(phaseShift: 0.2)
             ]
 
             let promoString = NSMutableAttributedString()
@@ -1273,7 +1317,69 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Helpers
 
-    private func animatedPromoColor(phaseShift: CGFloat) -> NSColor {
+    private var brandClaudeColor: NSColor {
+        NSColor(red: 0.83, green: 0.53, blue: 0.30, alpha: 1.0)
+    }
+
+    private func shouldAnimateUsageHighlight(percentage: Int, highThreshold: Int) -> Bool {
+        percentage == 0 || percentage >= highThreshold
+    }
+
+    private var shouldAnimateClaudeBrandAccent: Bool {
+        canDisplay(.claude) && viewModel.shouldAnimateClaudeUsageActivity
+    }
+
+    private var shouldAnimateClaudeHighlightedValues: Bool {
+        let showFiveHour = !viewModel.showOnlyWeekly
+        let showWeekly = !viewModel.showOnly5hr
+
+        return (
+            (showFiveHour && shouldAnimateUsageHighlight(percentage: viewModel.usageData.fiveHourUsed, highThreshold: 90)) ||
+            (showWeekly && shouldAnimateUsageHighlight(percentage: viewModel.usageData.weeklyUsed, highThreshold: 80))
+        )
+    }
+
+    private var shouldAnimateCodexBrandAccent: Bool {
+        canDisplay(.codex) && viewModel.shouldAnimateCodexUsageActivity
+    }
+
+    private var shouldAnimateCodexHighlightedValues: Bool {
+        let showPrimary = !viewModel.showOnlyWeekly
+        let showSecondary = !viewModel.showOnly5hr
+        let codex = viewModel.codexUsageData
+
+        return (
+            (showPrimary && shouldAnimateUsageHighlight(percentage: codex.primaryUsedPercent, highThreshold: 90)) ||
+            (showSecondary && shouldAnimateUsageHighlight(percentage: codex.secondaryUsedPercent, highThreshold: 80))
+        )
+    }
+
+    private var shouldAnimateMenuMetadata: Bool {
+        viewModel.shouldShowCodexPromo || viewModel.shouldShowClaudePeakIndicator
+    }
+
+    private var shouldAnimateAnyAccentState: Bool {
+        shouldAnimateClaudeBrandAccent ||
+            shouldAnimateCodexBrandAccent ||
+            shouldAnimateClaudeHighlightedValues ||
+            shouldAnimateCodexHighlightedValues ||
+            shouldAnimateMenuMetadata
+    }
+
+    private func usageHighlightColor(
+        percentage: Int,
+        highThreshold: Int,
+        accentColor: NSColor,
+        fallback: NSColor
+    ) -> NSColor
+    {
+        guard shouldAnimateUsageHighlight(percentage: percentage, highThreshold: highThreshold) else {
+            return fallback
+        }
+        return accentColor
+    }
+
+    private func animatedCodexAccentColor(phaseShift: CGFloat = 0) -> NSColor {
         let colors = [
             NSColor(red: 0.15, green: 0.81, blue: 0.63, alpha: 1.0),
             NSColor(red: 0.14, green: 0.73, blue: 0.94, alpha: 1.0),
@@ -1289,14 +1395,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return colors[startIndex].blended(withFraction: blend, of: colors[endIndex]) ?? colors[startIndex]
     }
 
-    private func animatedClaudePeakColor() -> NSColor {
+    private func animatedClaudeAccentColor(phaseShift: CGFloat = 0) -> NSColor {
         let colors = [
             NSColor(red: 0.83, green: 0.53, blue: 0.30, alpha: 1.0),
             NSColor(red: 0.91, green: 0.67, blue: 0.45, alpha: 1.0),
             NSColor(red: 0.75, green: 0.42, blue: 0.20, alpha: 1.0)
         ]
 
-        let scaled = promoAnimationPhase * CGFloat(colors.count)
+        let normalizedPhase = (promoAnimationPhase + phaseShift).truncatingRemainder(dividingBy: 1.0)
+        let scaled = normalizedPhase * CGFloat(colors.count)
         let startIndex = Int(floor(scaled)) % colors.count
         let endIndex = (startIndex + 1) % colors.count
         let blend = scaled - CGFloat(startIndex)

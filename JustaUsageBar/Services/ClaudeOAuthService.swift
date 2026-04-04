@@ -219,8 +219,8 @@ final class ClaudeOAuthService {
             throw APIError.noCredentials
         }
 
-        // Check if token needs refresh
-        if let expiresAt = creds.expiresAt, expiresAt < Date() {
+        // Refresh slightly before expiry to avoid a stale-token race in the menu refresh loop.
+        if let expiresAt = creds.expiresAt, expiresAt <= Date().addingTimeInterval(60) {
             if let refreshToken = creds.refreshToken {
                 creds = try await refreshAccessToken(refreshToken: refreshToken)
                 cachedCredentials = creds
@@ -254,7 +254,7 @@ final class ClaudeOAuthService {
             return try parseOAuthUsageResponse(data)
         case 429:
             throw APIError.rateLimited
-        case 401, 403:
+        case 400, 401, 403:
             // Try refresh once
             if let refreshToken = creds.refreshToken {
                 do {
@@ -275,8 +275,12 @@ final class ClaudeOAuthService {
                     throw APIError.unauthorized
                 }
             }
+            if Self.isExpiredOAuthResponse(data) {
+                clearCache()
+                throw APIError.unauthorized
+            }
             clearCache()
-            throw APIError.unauthorized
+            throw httpResponse.statusCode == 400 ? APIError.unknown(httpResponse.statusCode) : APIError.unauthorized
         default:
             throw APIError.unknown(httpResponse.statusCode)
         }
@@ -324,6 +328,16 @@ final class ClaudeOAuthService {
             expiresAt: expiresAt,
             scopes: cachedCredentials?.scopes ?? []
         )
+    }
+
+    private static func isExpiredOAuthResponse(_ data: Data) -> Bool {
+        guard let body = String(data: data, encoding: .utf8)?.lowercased() else {
+            return false
+        }
+
+        return body.contains("oauth token has expired")
+            || body.contains("\"authentication_error\"")
+            || body.contains("invalid_grant")
     }
 
     // MARK: - Parse Response

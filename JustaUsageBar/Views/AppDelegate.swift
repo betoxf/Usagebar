@@ -763,7 +763,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 arguments: ["outdated", "--cask", "justausagebar"]
             )
 
-            guard outdated.status == 0 else {
+            // Homebrew returns exit code 1 when `outdated` finds matching entries.
+            guard outdated.status == 0 || outdated.status == 1 else {
                 return .failed("""
                 Could not check for updates.
                 \(summarizeCommandOutput(outdated.output))

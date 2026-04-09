@@ -172,7 +172,7 @@ final class CodexAPIService {
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.setValue("Bearer \(creds.accessToken)", forHTTPHeaderField: "Authorization")
-        request.setValue("JustaUsageBar/1.0", forHTTPHeaderField: "User-Agent")
+        request.setValue("Usagebar/1.0", forHTTPHeaderField: "User-Agent")
         if let accountId = creds.accountId {
             request.setValue(accountId, forHTTPHeaderField: "ChatGPT-Account-Id")
         }

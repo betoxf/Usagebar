@@ -2,7 +2,7 @@
 set -e
 
 echo ""
-echo "  Just A Usage Bar - Installer"
+echo "  Usagebar - Installer"
 echo "  ============================="
 echo ""
 
@@ -10,13 +10,13 @@ echo ""
 if command -v brew &>/dev/null; then
     echo "  [+] Homebrew found"
     echo "  [*] Installing via Homebrew..."
-    brew install betoxf/tap/justausagebar
+    brew install betoxf/tap/usagebar
     echo ""
-    echo "  Done! JustaUsageBar has been installed."
+    echo "  Done! Usagebar has been installed."
     echo ""
-    echo "  To launch:  open -a JustaUsageBar"
-    echo "  To update:  brew upgrade betoxf/tap/justausagebar"
-    echo "  To remove:  brew uninstall justausagebar"
+    echo "  To launch:  open -a Usagebar"
+    echo "  To update:  brew upgrade betoxf/tap/usagebar"
+    echo "  To remove:  brew uninstall usagebar"
     echo ""
 else
     echo "  [!] Homebrew not found."
@@ -25,9 +25,9 @@ else
     echo '    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
     echo ""
     echo "  Option 2: Build from source:"
-    echo "    git clone https://github.com/betoxf/JustaUsageBar.git"
-    echo "    cd JustaUsageBar && make release"
-    echo "    cp -R build/Release/JustaUsageBar.app /Applications/"
+    echo "    git clone https://github.com/betoxf/Usagebar.git"
+    echo "    cd Usagebar && make release"
+    echo "    cp -R build/Release/Usagebar.app /Applications/"
     echo ""
     exit 1
 fi

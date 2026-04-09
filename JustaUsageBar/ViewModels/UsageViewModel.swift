@@ -237,15 +237,15 @@ final class UsageViewModel: ObservableObject {
         return calendar.date(from: DateComponents(
             timeZone: codexPromoTimeZone,
             year: 2026,
-            month: 4,
-            day: 2,
+            month: 5,
+            day: 31,
             hour: 23,
             minute: 59,
             second: 59
         ))
     }
 
-    /// Temporary Codex promo runs through April 2, 2026 at 11:59 PM PT.
+    /// Temporary Codex promo runs through May 31, 2026 at 11:59 PM PT.
     var isPromoVisibilityInWindow: Bool {
         guard let cutoff = codexPromoEndDate else {
             return false
@@ -298,7 +298,7 @@ final class UsageViewModel: ObservableObject {
 
     var codexPromoEndDisplayText: String {
         guard let endDate = codexPromoEndDate else {
-            return "Apr 2"
+            return "May 31"
         }
 
         let formatter = DateFormatter()

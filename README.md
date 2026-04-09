@@ -1,13 +1,13 @@
-# Just A Usage Bar
+# Usagebar
 
 <p align="center">
-  <img src="images/image3.png" alt="JustaUsageBar screenshot" width="600">
+  <img src="images/image3.png" alt="Usagebar screenshot" width="600">
 </p>
 
 A lightweight macOS menu bar app that shows your **Claude** and **Codex** (OpenAI) usage at a glance -- 5-hour rolling window and 7-day limits, right in your menu bar.
 
 <p align="center">
-  <img src="images/demo.gif" alt="JustaUsageBar demo" width="600">
+  <img src="images/demo.gif" alt="Usagebar demo" width="600">
 </p>
 
 ![macOS](https://img.shields.io/badge/macOS-14.0%2B-blue)
@@ -17,7 +17,7 @@ A lightweight macOS menu bar app that shows your **Claude** and **Codex** (OpenA
 ## Install
 
 ```bash
-brew install betoxf/tap/justausagebar
+brew install betoxf/tap/usagebar
 ```
 
 That's it. If you have Claude CLI or Codex CLI logged in, the app auto-detects your credentials -- zero config.
@@ -28,22 +28,22 @@ If you already have the app installed, update it with:
 
 ```bash
 brew update
-brew upgrade --cask justausagebar
+brew upgrade --cask usagebar
 ```
 
-If you installed manually, download the latest `JustaUsageBar.app` from Releases and replace the copy in `/Applications`.
+If you installed manually, download the latest `Usagebar.app` from Releases and replace the copy in `/Applications`.
 
 > **No Homebrew?** Run this instead:
 > ```bash
-> /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/betoxf/JustaUsageBar/main/install.sh)"
+> /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/betoxf/Usagebar/main/install.sh)"
 > ```
 
 ---
 
 ## Quick Start
 
-1. **Install** -- `brew install betoxf/tap/justausagebar`
-2. **Launch** -- open JustaUsageBar from Applications (or `open -a JustaUsageBar`)
+1. **Install** -- `brew install betoxf/tap/usagebar`
+2. **Launch** -- open Usagebar from Applications (or `open -a Usagebar`)
 3. **Done** -- if you use Claude CLI or Codex CLI, credentials are detected automatically
 
 If you don't use the CLIs, click the menu bar item > **Setup Usage Tracking** > **Sign in with Browser**.
@@ -127,12 +127,12 @@ codex login
 
 | Action | Command |
 |--------|---------|
-| Install | `brew install betoxf/tap/justausagebar` |
-| Update | `brew update && brew upgrade --cask justausagebar` |
-| Uninstall | `brew uninstall justausagebar` |
-| Check version | `brew info betoxf/tap/justausagebar` |
+| Install | `brew install betoxf/tap/usagebar` |
+| Update | `brew update && brew upgrade --cask usagebar` |
+| Uninstall | `brew uninstall usagebar` |
+| Check version | `brew info betoxf/tap/usagebar` |
 | Check auto-start | Menu bar > look for checkmark on "Launch at Login" |
-| Launch manually | `open -a JustaUsageBar` |
+| Launch manually | `open -a Usagebar` |
 
 ## How It Works
 
@@ -174,10 +174,10 @@ Usage refreshes every 60 seconds. OAuth tokens refresh automatically when expire
 ## Build from Source
 
 ```bash
-git clone https://github.com/betoxf/JustaUsageBar.git
-cd JustaUsageBar
+git clone https://github.com/betoxf/Usagebar.git
+cd Usagebar
 make release
-# App at build/DerivedData/Build/Products/Release/JustaUsageBar.app -- drag to /Applications
+# App at build/DerivedData/Build/Products/Release/Usagebar.app -- drag to /Applications
 ```
 
 ## Privacy & Security

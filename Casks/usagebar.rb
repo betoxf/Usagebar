@@ -1,4 +1,4 @@
-cask "justausagebar" do
+cask "usagebar" do
   version "1.2.0"
   sha256 "d8e211df9e48c3aa0f62ae5e2b1055cf9b945925fd01cedaf002c6fcddf58590"
 
@@ -12,10 +12,8 @@ cask "justausagebar" do
   app "Usagebar.app"
 
   postflight do
-    # Remove quarantine flag so Gatekeeper doesn't block the unsigned app
     system_command "/usr/bin/xattr",
                    args: ["-c", "#{appdir}/Usagebar.app"]
-    # Launch the app immediately after install
     system_command "/usr/bin/open",
                    args: ["-a", "#{appdir}/Usagebar.app"]
   end

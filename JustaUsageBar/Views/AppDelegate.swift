@@ -585,7 +585,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func authenticateCodex() {
         presentAlert(
             title: "Authenticate Codex",
-            message: "Run `codex login` in Terminal, then click Refresh in JustaUsageBar.",
+            message: "Run `codex login` in Terminal, then click Refresh in Usagebar.",
             style: .informational
         )
     }
@@ -687,7 +687,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .alreadyUpToDate:
                 presentAlert(
                     title: "Already up to date",
-                    message: "JustaUsageBar is on the latest version.",
+                    message: "Usagebar is on the latest version.",
                     style: .informational
                 )
             case .failed(let message):
@@ -728,25 +728,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let output: String
     }
 
+    nonisolated private static let preferredCaskTokens = ["usagebar", "justausagebar"]
+
     nonisolated private static func performHomebrewUpdate() -> UpdateResult {
         guard let brewURL = brewExecutableURL() else {
             return .failed("""
             Homebrew was not found. Run in Terminal:
-            brew update && brew upgrade --cask justausagebar
+            brew update && brew upgrade --cask usagebar
             """)
         }
 
         do {
-            let isManagedByBrew = try runCommand(
-                executableURL: brewURL,
-                arguments: ["list", "--cask", "justausagebar"]
-            )
-
-            guard isManagedByBrew.status == 0 else {
+            guard let installedCaskToken = try installedCaskToken(brewURL: brewURL) else {
                 return .failed("""
-                This copy of JustaUsageBar is not managed by Homebrew cask.
+                This copy of Usagebar is not managed by Homebrew cask.
                 Reinstall it with:
-                brew install --cask betoxf/tap/justausagebar
+                brew install --cask betoxf/tap/usagebar
                 """)
             }
 
@@ -760,7 +757,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             let outdated = try runCommand(
                 executableURL: brewURL,
-                arguments: ["outdated", "--cask", "justausagebar"]
+                arguments: ["outdated", "--cask", installedCaskToken]
             )
 
             // Homebrew returns exit code 1 when `outdated` finds matching entries.
@@ -774,7 +771,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let isOutdated = outdated.output
                 .split(whereSeparator: \.isNewline)
                 .contains { line in
-                    line.trimmingCharacters(in: .whitespacesAndNewlines) == "justausagebar"
+                    line.trimmingCharacters(in: .whitespacesAndNewlines) == installedCaskToken
                 }
 
             guard isOutdated else {
@@ -783,7 +780,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             let upgrade = try runCommand(
                 executableURL: brewURL,
-                arguments: ["upgrade", "--cask", "justausagebar"]
+                arguments: ["upgrade", "--cask", installedCaskToken]
             )
 
             guard upgrade.status == 0 else {
@@ -800,6 +797,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             \(error.localizedDescription)
             """)
         }
+    }
+
+    nonisolated private static func installedCaskToken(brewURL: URL) throws -> String? {
+        for token in preferredCaskTokens {
+            let result = try runCommand(
+                executableURL: brewURL,
+                arguments: ["list", "--cask", token]
+            )
+            if result.status == 0 {
+                return token
+            }
+        }
+        return nil
     }
 
     nonisolated private static func brewExecutableURL() -> URL? {

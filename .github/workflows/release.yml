@@ -25,17 +25,17 @@ jobs:
       - name: Create zip
         run: |
           mkdir -p build/Release
-          cp -R build/DerivedData/Build/Products/Release/JustaUsageBar.app build/Release/
-          cd build/Release && zip -r ../../JustaUsageBar.zip JustaUsageBar.app
+          cp -R build/DerivedData/Build/Products/Release/Usagebar.app build/Release/
+          cd build/Release && zip -r ../../Usagebar.zip Usagebar.app
 
       - name: Get SHA256
         id: sha
-        run: echo "sha256=$(shasum -a 256 JustaUsageBar.zip | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+        run: echo "sha256=$(shasum -a 256 Usagebar.zip | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: JustaUsageBar.zip
+          files: Usagebar.zip
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

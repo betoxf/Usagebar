@@ -13,6 +13,11 @@ enum DisplayProvider: String {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    nonisolated private static let lastLaunchedAppDescriptorDefaultsKey = "lastLaunchedAppDescriptor"
+    nonisolated private static let lastUpdateCheckAtDefaultsKey = "lastUpdateCheckAt"
+    nonisolated private static let lastInstalledUpdateAtDefaultsKey = "lastInstalledUpdateAt"
+    nonisolated private static let latestReleaseAPIURL = URL(string: "https://api.github.com/repos/betoxf/Usagebar/releases/latest")!
+
     private var statusItem: NSStatusItem!
     private var menu: NSMenu!
     private var viewModel = UsageViewModel.shared
@@ -32,6 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupStatusItem()
         setupMenu()
         observeChanges()
+        recordInstalledAppVersionIfNeeded()
 
         NSApp.setActivationPolicy(.accessory)
 
@@ -500,6 +506,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
+        menu.addItem(makeStatusMessageItem("Version \(installedAppDescriptor)", color: .secondaryLabelColor))
+
+        if let updatedAt = installedAppUpdatedAt {
+            menu.addItem(makeStatusMessageItem("Updated \(formatMenuTimestamp(updatedAt))", color: .secondaryLabelColor))
+        }
+
+        if let lastCheckedAt = lastUpdateCheckAt {
+            menu.addItem(makeStatusMessageItem("Checked \(formatMenuTimestamp(lastCheckedAt))", color: .secondaryLabelColor))
+        }
+
+        menu.addItem(NSMenuItem.separator())
+
         // Check for Updates
         let updateItem = NSMenuItem(title: "Check for Updates", action: #selector(checkForUpdates), keyEquivalent: "u")
         updateItem.target = self
@@ -678,22 +696,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         Task {
             let updateResult = await Task.detached(priority: .userInitiated) {
-                Self.performHomebrewUpdate()
+                await Self.performUpdateCheck()
             }.value
 
+            persistUpdateCheckMetadata(from: updateResult)
+            rebuildMenu()
+
             switch updateResult {
-            case .updated:
+            case .updated(_):
                 relaunchApplication(at: appURL)
-            case .alreadyUpToDate:
+            case .alreadyUpToDate(let status):
                 presentAlert(
                     title: "Already up to date",
-                    message: "Usagebar is on the latest version.",
+                    message: alreadyUpToDateMessage(for: status),
                     style: .informational
                 )
-            case .failed(let message):
+            case .failed(let status, let message):
                 presentAlert(
                     title: "Update failed",
-                    message: message,
+                    message: failureMessage(message, status: status),
                     style: .warning
                 )
             }
@@ -717,10 +738,103 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.runModal()
     }
 
+    private var installedAppDescriptor: String {
+        let appInfo = Self.installedAppInfo()
+        return "\(appInfo.version) (\(appInfo.build))"
+    }
+
+    private var installedAppUpdatedAt: Date? {
+        Self.installedAppInfo().updatedAt
+    }
+
+    private var lastUpdateCheckAt: Date? {
+        UserDefaults.standard.object(forKey: Self.lastUpdateCheckAtDefaultsKey) as? Date
+    }
+
+    private func recordInstalledAppVersionIfNeeded() {
+        let defaults = UserDefaults.standard
+        let currentDescriptor = installedAppDescriptor
+        let previousDescriptor = defaults.string(forKey: Self.lastLaunchedAppDescriptorDefaultsKey)
+
+        guard previousDescriptor != currentDescriptor else {
+            return
+        }
+
+        defaults.set(currentDescriptor, forKey: Self.lastLaunchedAppDescriptorDefaultsKey)
+        defaults.set(Date(), forKey: Self.lastInstalledUpdateAtDefaultsKey)
+    }
+
+    private func persistUpdateCheckMetadata(from result: UpdateResult) {
+        UserDefaults.standard.set(result.status.checkedAt, forKey: Self.lastUpdateCheckAtDefaultsKey)
+    }
+
+    private func alreadyUpToDateMessage(for status: UpdateStatus) -> String {
+        var lines = [
+            "Installed: Usagebar \(status.installedApp.version) (\(status.installedApp.build))"
+        ]
+
+        if let latestRelease = status.latestRelease {
+            var latestLine = "Latest release: \(latestRelease.version)"
+            if let publishedAt = latestRelease.publishedAt {
+                latestLine += " • \(formatAlertTimestamp(publishedAt))"
+            }
+            lines.append(latestLine)
+        }
+
+        if let updatedAt = status.installedApp.updatedAt {
+            lines.append("Updated: \(formatAlertTimestamp(updatedAt))")
+        }
+
+        lines.append("Checked: \(formatAlertTimestamp(status.checkedAt))")
+        return lines.joined(separator: "\n")
+    }
+
+    private func failureMessage(_ message: String, status: UpdateStatus) -> String {
+        "\(message)\n\n\(alreadyUpToDateMessage(for: status))"
+    }
+
+    private func formatMenuTimestamp(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+
+    private func formatAlertTimestamp(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .long
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+
     private enum UpdateResult {
-        case updated
-        case alreadyUpToDate
-        case failed(String)
+        case updated(UpdateStatus)
+        case alreadyUpToDate(UpdateStatus)
+        case failed(UpdateStatus, String)
+
+        var status: UpdateStatus {
+            switch self {
+            case .updated(let status), .alreadyUpToDate(let status), .failed(let status, _):
+                return status
+            }
+        }
+    }
+
+    private struct InstalledAppInfo {
+        let version: String
+        let build: String
+        let updatedAt: Date?
+    }
+
+    private struct ReleaseInfo {
+        let version: String
+        let publishedAt: Date?
+    }
+
+    private struct UpdateStatus {
+        let installedApp: InstalledAppInfo
+        let latestRelease: ReleaseInfo?
+        let checkedAt: Date
     }
 
     private struct CommandResult {
@@ -730,9 +844,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     nonisolated private static let preferredCaskTokens = ["usagebar", "justausagebar"]
 
-    nonisolated private static func performHomebrewUpdate() -> UpdateResult {
+    nonisolated private static func performUpdateCheck() async -> UpdateResult {
+        let status = UpdateStatus(
+            installedApp: installedAppInfo(),
+            latestRelease: try? await fetchLatestRelease(),
+            checkedAt: Date()
+        )
+
+        if let latestRelease = status.latestRelease,
+           latestRelease.version.compare(status.installedApp.version, options: .numeric) != .orderedDescending {
+            return .alreadyUpToDate(status)
+        }
+
+        return performHomebrewUpdate(status: status)
+    }
+
+    nonisolated private static func performHomebrewUpdate(status: UpdateStatus) -> UpdateResult {
         guard let brewURL = brewExecutableURL() else {
-            return .failed("""
+            return .failed(status, """
             Homebrew was not found. Run in Terminal:
             brew update && brew upgrade --cask usagebar
             """)
@@ -740,7 +869,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         do {
             guard let installedCaskToken = try installedCaskToken(brewURL: brewURL) else {
-                return .failed("""
+                return .failed(status, """
                 This copy of Usagebar is not managed by Homebrew cask.
                 Reinstall it with:
                 brew install --cask betoxf/tap/usagebar
@@ -749,7 +878,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             let update = try runCommand(executableURL: brewURL, arguments: ["update", "--quiet"])
             guard update.status == 0 else {
-                return .failed("""
+                return .failed(status, """
                 Homebrew update failed.
                 \(summarizeCommandOutput(update.output))
                 """)
@@ -757,12 +886,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             let outdated = try runCommand(
                 executableURL: brewURL,
-                arguments: ["outdated", "--cask", installedCaskToken]
+                arguments: ["outdated", "--cask", installedCaskToken],
+                environment: ["HOMEBREW_NO_AUTO_UPDATE": "1"]
             )
 
             // Homebrew returns exit code 1 when `outdated` finds matching entries.
             guard outdated.status == 0 || outdated.status == 1 else {
-                return .failed("""
+                return .failed(status, """
                 Could not check for updates.
                 \(summarizeCommandOutput(outdated.output))
                 """)
@@ -775,24 +905,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
 
             guard isOutdated else {
-                return .alreadyUpToDate
+                if let latestRelease = status.latestRelease,
+                   latestRelease.version.compare(status.installedApp.version, options: .numeric) == .orderedDescending {
+                    return .failed(status, """
+                    Latest release \(latestRelease.version) is published, but Homebrew has not picked it up yet.
+                    Try again in a minute.
+                    """)
+                }
+                return .alreadyUpToDate(status)
             }
 
             let upgrade = try runCommand(
                 executableURL: brewURL,
-                arguments: ["upgrade", "--cask", installedCaskToken]
+                arguments: ["upgrade", "--cask", installedCaskToken],
+                environment: ["HOMEBREW_NO_AUTO_UPDATE": "1"]
             )
 
             guard upgrade.status == 0 else {
-                return .failed("""
+                return .failed(status, """
                 Homebrew could not install the update.
                 \(summarizeCommandOutput(upgrade.output))
                 """)
             }
 
-            return .updated
+            return .updated(status)
         } catch {
-            return .failed("""
+            return .failed(status, """
             Homebrew update failed.
             \(error.localizedDescription)
             """)
@@ -812,6 +950,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return nil
     }
 
+    nonisolated private static func fetchLatestRelease() async throws -> ReleaseInfo {
+        var request = URLRequest(url: latestReleaseAPIURL)
+        request.timeoutInterval = 8
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        request.setValue("Usagebar", forHTTPHeaderField: "User-Agent")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+            throw URLError(.badServerResponse)
+        }
+
+        guard
+            let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let tagName = json["tag_name"] as? String
+        else {
+            throw URLError(.cannotParseResponse)
+        }
+
+        let version = tagName.hasPrefix("v") ? String(tagName.dropFirst()) : tagName
+        let publishedAt: Date?
+
+        if let publishedAtString = json["published_at"] as? String {
+            publishedAt = ISO8601DateFormatter().date(from: publishedAtString)
+        } else {
+            publishedAt = nil
+        }
+
+        return ReleaseInfo(version: version, publishedAt: publishedAt)
+    }
+
+    nonisolated private static func installedAppInfo() -> InstalledAppInfo {
+        let infoDictionary = Bundle.main.infoDictionary ?? [:]
+        let version = infoDictionary["CFBundleShortVersionString"] as? String ?? "Unknown"
+        let build = infoDictionary["CFBundleVersion"] as? String ?? "?"
+        let storedUpdatedAt = UserDefaults.standard.object(forKey: lastInstalledUpdateAtDefaultsKey) as? Date
+        let bundleResourceValues = try? Bundle.main.bundleURL.resourceValues(forKeys: [.contentModificationDateKey])
+        let bundleUpdatedAt = bundleResourceValues?.contentModificationDate
+
+        return InstalledAppInfo(
+            version: version,
+            build: build,
+            updatedAt: storedUpdatedAt ?? bundleUpdatedAt
+        )
+    }
+
     nonisolated private static func brewExecutableURL() -> URL? {
         let candidatePaths = [
             "/opt/homebrew/bin/brew",
@@ -827,10 +1012,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return nil
     }
 
-    nonisolated private static func runCommand(executableURL: URL, arguments: [String]) throws -> CommandResult {
+    nonisolated private static func runCommand(
+        executableURL: URL,
+        arguments: [String],
+        environment: [String: String] = [:]
+    ) throws -> CommandResult {
         let process = Process()
         process.executableURL = executableURL
         process.arguments = arguments
+        process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, new in new }
 
         let pipe = Pipe()
         process.standardOutput = pipe

@@ -362,7 +362,7 @@ final class UsageViewModel: ObservableObject {
 
     func clearClaudeCredentials() {
         CredentialStorage.shared.clearAll()
-        ClaudeOAuthService.shared.clearCache()
+        ClaudeOAuthService.shared.clearPersistedCredentials()
         claudeAuthSource = .none
         usageData = .placeholder
         claudeError = nil

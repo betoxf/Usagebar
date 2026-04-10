@@ -17,6 +17,14 @@ final class CredentialStorage {
     struct Credentials: Codable {
         var sessionKey: String?
         var organizationId: String?
+        var claudeOAuth: ClaudeOAuthCredentials?
+    }
+
+    struct ClaudeOAuthCredentials: Codable {
+        var accessToken: String
+        var refreshToken: String?
+        var expiresAt: Date?
+        var scopes: [String]
     }
 
     private init() {
@@ -51,9 +59,36 @@ final class CredentialStorage {
         sessionKey != nil && organizationId != nil
     }
 
+    var claudeOAuthCredentials: ClaudeOAuthCredentials? {
+        get { cachedCredentials?.claudeOAuth }
+        set {
+            if cachedCredentials == nil {
+                cachedCredentials = Credentials()
+            }
+            cachedCredentials?.claudeOAuth = newValue
+            saveCredentials()
+        }
+    }
+
     func clearAll() {
         cachedCredentials = nil
         try? FileManager.default.removeItem(at: credentialsFileURL)
+    }
+
+    func clearClaudeOAuthCredentials() {
+        guard cachedCredentials != nil else {
+            return
+        }
+
+        cachedCredentials?.claudeOAuth = nil
+
+        if cachedCredentials?.sessionKey == nil && cachedCredentials?.organizationId == nil {
+            cachedCredentials = nil
+            try? FileManager.default.removeItem(at: credentialsFileURL)
+            return
+        }
+
+        saveCredentials()
     }
 
     // MARK: - File Storage

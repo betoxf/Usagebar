@@ -40,26 +40,29 @@ final class ClaudeOAuthService {
             return cachedCredentials
         }
 
-        // 1. Try Keychain directly first. On many machines Claude stores credentials
-        // only in Keychain, and the item is fresher than any file fallback.
-        if let creds = readFromKeychain() {
-            cachedCredentials = creds
-            lastCredentialCheck = Date()
+        // 1. Prefer the app's own encrypted mirror so updates don't trigger repeated
+        // macOS password prompts for the same Claude OAuth credentials.
+        if let creds = readPersistedCredentials() {
+            cache(credentials: creds)
             return creds
         }
 
-        // 2. Fall back to the security CLI. This is more resilient after restarts
-        // when a direct Keychain read from a GUI app is flaky.
-        if let creds = readFromKeychainUsingSecurityCLI() {
-            cachedCredentials = creds
-            lastCredentialCheck = Date()
-            return creds
-        }
-
-        // 3. Try credentials file (~/.claude/.credentials.json)
+        // 2. Try credentials file (~/.claude/.credentials.json) when available.
         if let creds = readCredentialsFile() {
-            cachedCredentials = creds
-            lastCredentialCheck = Date()
+            cache(credentials: creds, persist: true)
+            return creds
+        }
+
+        // 3. Prefer the stable Apple-signed `security` tool before a direct GUI
+        // Keychain read so app updates don't look like a new requester to Keychain.
+        if let creds = readFromKeychainUsingSecurityCLI() {
+            cache(credentials: creds, persist: true)
+            return creds
+        }
+
+        // 4. Fall back to a direct Keychain read only when the safer paths miss.
+        if let creds = readFromKeychain() {
+            cache(credentials: creds, persist: true)
             return creds
         }
 
@@ -75,6 +78,11 @@ final class ClaudeOAuthService {
     func clearCache() {
         cachedCredentials = nil
         lastCredentialCheck = nil
+    }
+
+    func clearPersistedCredentials() {
+        clearCache()
+        CredentialStorage.shared.clearClaudeOAuthCredentials()
     }
 
     // MARK: - Read from ~/.claude/.credentials.json
@@ -223,10 +231,9 @@ final class ClaudeOAuthService {
         if let expiresAt = creds.expiresAt, expiresAt <= Date().addingTimeInterval(60) {
             if let refreshToken = creds.refreshToken {
                 creds = try await refreshAccessToken(refreshToken: refreshToken)
-                cachedCredentials = creds
-                lastCredentialCheck = Date()
+                cache(credentials: creds, persist: true)
             } else {
-                clearCache()
+                clearPersistedCredentials()
                 throw APIError.unauthorized
             }
         }
@@ -259,27 +266,26 @@ final class ClaudeOAuthService {
             if let refreshToken = creds.refreshToken {
                 do {
                     let newCreds = try await refreshAccessToken(refreshToken: refreshToken)
-                    cachedCredentials = newCreds
-                    lastCredentialCheck = Date()
+                    cache(credentials: newCreds, persist: true)
 
                     var retryRequest = request
                     retryRequest.setValue("Bearer \(newCreds.accessToken)", forHTTPHeaderField: "Authorization")
                     let (retryData, retryResponse) = try await URLSession.shared.data(for: retryRequest)
                     guard let retryHttp = retryResponse as? HTTPURLResponse, retryHttp.statusCode == 200 else {
-                        clearCache()
+                        clearPersistedCredentials()
                         throw APIError.unauthorized
                     }
                     return try parseOAuthUsageResponse(retryData)
                 } catch {
-                    clearCache()
+                    clearPersistedCredentials()
                     throw APIError.unauthorized
                 }
             }
             if Self.isExpiredOAuthResponse(data) {
-                clearCache()
+                clearPersistedCredentials()
                 throw APIError.unauthorized
             }
-            clearCache()
+            clearPersistedCredentials()
             throw httpResponse.statusCode == 400 ? APIError.unknown(httpResponse.statusCode) : APIError.unauthorized
         default:
             throw APIError.unknown(httpResponse.statusCode)
@@ -327,6 +333,35 @@ final class ClaudeOAuthService {
             refreshToken: newRefreshToken,
             expiresAt: expiresAt,
             scopes: cachedCredentials?.scopes ?? []
+        )
+    }
+
+    private func cache(credentials: OAuthCredentials, persist: Bool = false) {
+        cachedCredentials = credentials
+        lastCredentialCheck = Date()
+
+        guard persist else {
+            return
+        }
+
+        CredentialStorage.shared.claudeOAuthCredentials = .init(
+            accessToken: credentials.accessToken,
+            refreshToken: credentials.refreshToken,
+            expiresAt: credentials.expiresAt,
+            scopes: credentials.scopes
+        )
+    }
+
+    private func readPersistedCredentials() -> OAuthCredentials? {
+        guard let stored = CredentialStorage.shared.claudeOAuthCredentials else {
+            return nil
+        }
+
+        return OAuthCredentials(
+            accessToken: stored.accessToken,
+            refreshToken: stored.refreshToken,
+            expiresAt: stored.expiresAt,
+            scopes: stored.scopes
         )
     }
 

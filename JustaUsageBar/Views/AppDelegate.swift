@@ -521,6 +521,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let reviewRepoItem = NSMenuItem(title: "Review GitHub Repo", action: #selector(openGitHubRepository), keyEquivalent: "")
         reviewRepoItem.target = self
+        if let githubMark = NSImage(named: "GitHubMark") {
+            githubMark.size = NSSize(width: 14, height: 14)
+            reviewRepoItem.image = githubMark
+        }
         menu.addItem(reviewRepoItem)
 
         // Check for Updates

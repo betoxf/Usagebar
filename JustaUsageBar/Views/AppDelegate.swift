@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     nonisolated private static let lastUpdateCheckAtDefaultsKey = "lastUpdateCheckAt"
     nonisolated private static let lastInstalledUpdateAtDefaultsKey = "lastInstalledUpdateAt"
     nonisolated private static let latestReleaseAPIURL = URL(string: "https://api.github.com/repos/betoxf/Usagebar/releases/latest")!
+    nonisolated private static let repositoryURL = URL(string: "https://github.com/betoxf/Usagebar")!
 
     private var statusItem: NSStatusItem!
     private var menu: NSMenu!
@@ -518,6 +519,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
+        let reviewRepoItem = NSMenuItem(title: "Review GitHub Repo", action: #selector(openGitHubRepository), keyEquivalent: "")
+        reviewRepoItem.target = self
+        menu.addItem(reviewRepoItem)
+
         // Check for Updates
         let updateItem = NSMenuItem(title: "Check for Updates", action: #selector(checkForUpdates), keyEquivalent: "u")
         updateItem.target = self
@@ -721,6 +726,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    @objc private func openGitHubRepository() {
+        NSWorkspace.shared.open(Self.repositoryURL)
+    }
+
     private func relaunchApplication(at appURL: URL) {
         let config = NSWorkspace.OpenConfiguration()
         config.createsNewApplicationInstance = true
@@ -779,6 +788,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 latestLine += " • \(formatAlertTimestamp(publishedAt))"
             }
             lines.append(latestLine)
+        } else {
+            lines.append("Latest release: unavailable right now")
         }
 
         if let updatedAt = status.installedApp.updatedAt {

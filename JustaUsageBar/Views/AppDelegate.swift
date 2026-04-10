@@ -1363,8 +1363,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let symbolConfig = NSImage.SymbolConfiguration(pointSize: 9, weight: .semibold)
             let arrowSize = NSSize(width: 10, height: 10)
             let badgeGap: CGFloat = 4
-            let totalWidth = arrowSize.width + badgeGap + valuesString.size().width
-            let startX = (width - totalWidth) / 2
+            let valuesX = (width - valuesString.size().width) / 2
+            let arrowX = max(0, valuesX - badgeGap - arrowSize.width)
             let badgeY = (height - arrowSize.height) / 2 - 0.2
 
             if let arrowSymbol = NSImage(
@@ -1376,10 +1376,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 animatedClaudeAccentColor(phaseShift: 0.34).set()
                 NSRect(origin: .zero, size: tintedSymbol.size).fill(using: .sourceAtop)
                 tintedSymbol.unlockFocus()
-                tintedSymbol.draw(in: NSRect(x: startX, y: badgeY, width: arrowSize.width, height: arrowSize.height))
+                tintedSymbol.draw(in: NSRect(x: arrowX, y: badgeY, width: arrowSize.width, height: arrowSize.height))
             }
 
-            valuesString.draw(at: NSPoint(x: startX + arrowSize.width + badgeGap, y: yOffset))
+            valuesString.draw(at: NSPoint(x: valuesX, y: yOffset))
         } else {
             valuesString.draw(at: NSPoint(x: (width - valuesString.size().width) / 2, y: yOffset))
         }
@@ -1516,12 +1516,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             promoString.append(NSAttributedString(string: "x", attributes: promoXAttributes))
 
             let promoGap: CGFloat = 4
-            let totalWidth = promoString.size().width + promoGap + valuesString.size().width
-            let startX = (width - totalWidth) / 2
+            let valuesX = (width - valuesString.size().width) / 2
+            let promoX = max(0, valuesX - promoGap - promoString.size().width)
             let promoY = (height - promoString.size().height) / 2 - (promoString.size().height * 0.2)
 
-            promoString.draw(at: NSPoint(x: startX, y: promoY))
-            valuesString.draw(at: NSPoint(x: startX + promoString.size().width + promoGap, y: yOffset))
+            promoString.draw(at: NSPoint(x: promoX, y: promoY))
+            valuesString.draw(at: NSPoint(x: valuesX, y: yOffset))
         } else {
             valuesString.draw(at: NSPoint(x: (width - valuesString.size().width) / 2, y: yOffset))
         }

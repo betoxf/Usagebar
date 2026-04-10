@@ -253,8 +253,18 @@ final class UsageViewModel: ObservableObject {
         return Date() <= cutoff
     }
 
+    var hasCodexProPlan: Bool {
+        codexUsageData.planType
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() == "pro"
+    }
+
     var shouldShowCodexPromo: Bool {
-        showPromoVisibility && isPromoVisibilityInWindow && showCodex && hasCodexCredentials
+        showPromoVisibility
+            && isPromoVisibilityInWindow
+            && showCodex
+            && hasCodexCredentials
+            && hasCodexProPlan
     }
 
     var shouldAnimateClaudeUsageActivity: Bool {

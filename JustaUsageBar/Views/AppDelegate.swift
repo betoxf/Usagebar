@@ -507,18 +507,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
-        menu.addItem(makeStatusMessageItem("Version \(installedAppDescriptor)", color: .secondaryLabelColor))
-
-        if let updatedAt = installedAppUpdatedAt {
-            menu.addItem(makeStatusMessageItem("Updated \(formatMenuTimestamp(updatedAt))", color: .secondaryLabelColor))
-        }
-
-        if let lastCheckedAt = lastUpdateCheckAt {
-            menu.addItem(makeStatusMessageItem("Checked \(formatMenuTimestamp(lastCheckedAt))", color: .secondaryLabelColor))
-        }
-
-        menu.addItem(NSMenuItem.separator())
-
         let reviewRepoItem = NSMenuItem(title: "Review GitHub Repo", action: #selector(openGitHubRepository), keyEquivalent: "")
         reviewRepoItem.target = self
         if let githubMark = NSImage(named: "GitHubMark") {

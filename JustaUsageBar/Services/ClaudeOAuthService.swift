@@ -223,6 +223,10 @@ final class ClaudeOAuthService {
     // MARK: - Fetch Usage via OAuth
 
     func fetchUsage() async throws -> UsageData {
+        try await fetchUsage(allowRediscovery: true)
+    }
+
+    private func fetchUsage(allowRediscovery: Bool) async throws -> UsageData {
         guard var creds = loadCredentials() else {
             throw APIError.noCredentials
         }
@@ -230,8 +234,22 @@ final class ClaudeOAuthService {
         // Refresh slightly before expiry to avoid a stale-token race in the menu refresh loop.
         if let expiresAt = creds.expiresAt, expiresAt <= Date().addingTimeInterval(60) {
             if let refreshToken = creds.refreshToken {
-                creds = try await refreshAccessToken(refreshToken: refreshToken)
-                cache(credentials: creds, persist: true)
+                do {
+                    creds = try await refreshAccessToken(refreshToken: refreshToken)
+                    cache(credentials: creds, persist: true)
+                } catch APIError.rateLimited {
+                    // Temporary throttle: keep the mirror, try again next tick.
+                    throw APIError.rateLimited
+                } catch {
+                    // The persisted mirror can hold a dead refresh token while the
+                    // Claude CLI keychain/file has a fresh one. Drop the mirror and
+                    // rediscover once instead of staying stuck signed out.
+                    clearPersistedCredentials()
+                    if allowRediscovery {
+                        return try await fetchUsage(allowRediscovery: false)
+                    }
+                    throw APIError.unauthorized
+                }
             } else {
                 clearPersistedCredentials()
                 throw APIError.unauthorized
@@ -276,6 +294,9 @@ final class ClaudeOAuthService {
                         throw APIError.unauthorized
                     }
                     return try parseOAuthUsageResponse(retryData)
+                } catch APIError.rateLimited {
+                    // Temporary throttle: keep credentials, try again next tick.
+                    throw APIError.rateLimited
                 } catch {
                     clearPersistedCredentials()
                     throw APIError.unauthorized
@@ -313,7 +334,13 @@ final class ClaudeOAuthService {
 
         let (data, response) = try await URLSession.shared.data(for: request)
 
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw APIError.unknown(0)
+        }
+        if httpResponse.statusCode == 429 {
+            throw APIError.rateLimited
+        }
+        guard httpResponse.statusCode == 200 else {
             throw APIError.unauthorized
         }
 
@@ -403,6 +430,27 @@ final class ClaudeOAuthService {
                 usageData.weeklyResetAt = parseDate(resetsAt)
             }
         }
+
+        // Fable 5 weekly window: reported as `seven_day_overage_included`
+        // (labeled "Fable 5 limit" in Claude Code). Fall back to any
+        // fable/mythos-named window in case the key evolves.
+        var fableWindow = json["seven_day_overage_included"] as? [String: Any]
+        if fableWindow == nil {
+            fableWindow = json.first { key, value in
+                let lowered = key.lowercased()
+                return (lowered.contains("fable") || lowered.contains("mythos")) && value is [String: Any]
+            }?.value as? [String: Any]
+        }
+        if let window = fableWindow, let utilization = window["utilization"] as? Double {
+            usageData.fableUsed = Int(utilization)
+            if let resetsAt = window["resets_at"] as? String {
+                usageData.fableResetAt = parseDate(resetsAt)
+            }
+        }
+
+        #if DEBUG
+        FileHandle.standardError.write(Data("Claude usage windows: \(json.keys.sorted())\n".utf8))
+        #endif
 
         return usageData
     }

@@ -255,6 +255,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     weeklyItem.attributedTitle = weeklyString
                     menu.addItem(weeklyItem)
 
+                    if viewModel.usageData.hasFableData {
+                        let fable = viewModel.usageData.fableUsed ?? 0
+                        let fableReset = viewModel.usageData.timeUntilFableReset
+                        let fableColor = usageHighlightColor(
+                            percentage: fable,
+                            highThreshold: 80,
+                            accentColor: brandClaudeColor,
+                            fallback: NSColor.labelColor
+                        )
+
+                        let fableItem = NSMenuItem(title: "  Fable: \(fable)%  \u{2022}  \(fableReset)", action: nil, keyEquivalent: "")
+                        fableItem.isEnabled = false
+                        let fableAttrs: [NSAttributedString.Key: Any] = [
+                            .font: NSFont.systemFont(ofSize: 11, weight: .regular)
+                        ]
+                        let fableString = NSMutableAttributedString(string: "  Fable: ", attributes: fableAttrs)
+                        fableString.append(NSAttributedString(string: "\(fable)", attributes: [
+                            .font: NSFont.systemFont(ofSize: 11, weight: .medium),
+                            .foregroundColor: fableColor
+                        ]))
+                        fableString.append(NSAttributedString(string: "%  \u{2022}  \(fableReset)", attributes: fableAttrs))
+                        fableItem.attributedTitle = fableString
+                        menu.addItem(fableItem)
+                    }
+
                     if let claudeError = viewModel.claudeError {
                         menu.addItem(makeStatusMessageItem(claudeError, color: .systemOrange))
                         if shouldPromptClaudeAuthentication {

@@ -38,6 +38,7 @@ final class UsageViewModel: ObservableObject {
     @AppStorage("showClaude") var showClaude: Bool = true
     @AppStorage("showCodex") var showCodex: Bool = true
     @AppStorage("animationInterval") var animationInterval: Double = 8.0
+    @AppStorage("followActiveApp") var followActiveApp: Bool = true
 
     // Launch at login using SMAppService (macOS 13+)
     var launchAtStartup: Bool {

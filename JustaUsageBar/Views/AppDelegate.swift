@@ -29,6 +29,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Provider switching state
     private var currentProvider: DisplayProvider = .claude
     private var providerSwitchTimer: Timer?
+    /// Provider forced by the frontmost app (Claude/ChatGPT/Codex), nil when
+    /// no matching app is active.
+    private var focusProvider: DisplayProvider?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusItem()
@@ -39,6 +42,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
 
         if viewModel.hasCredentials {
+            if viewModel.followActiveApp, let frontmost = NSWorkspace.shared.frontmostApplication {
+                focusProvider = provider(matching: frontmost)
+            }
             syncCurrentProvider(preferSavedSelection: true, persistPreference: true)
             restartProviderAnimation()
         } else {
@@ -67,6 +73,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             name: NSNotification.Name("UsageDataChanged"),
             object: nil
         )
+
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(activeAppChanged(_:)),
+            name: NSWorkspace.didActivateApplicationNotification,
+            object: nil
+        )
+    }
+
+    // MARK: - Focus-Aware Provider
+
+    @objc private func activeAppChanged(_ notification: Notification) {
+        guard viewModel.followActiveApp, viewModel.hasCredentials else { return }
+        guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else {
+            return
+        }
+
+        let newFocus = provider(matching: app)
+        guard newFocus != focusProvider else { return }
+        focusProvider = newFocus
+
+        if let provider = newFocus, canDisplay(provider) {
+            stopProviderAnimation()
+            setCurrentProvider(provider, persistPreference: false)
+            updateStatusImage()
+        } else {
+            syncCurrentProvider(preferSavedSelection: true)
+            restartProviderAnimation()
+        }
+    }
+
+    private func provider(matching app: NSRunningApplication) -> DisplayProvider? {
+        let bundleId = app.bundleIdentifier?.lowercased() ?? ""
+        let name = app.localizedName?.lowercased() ?? ""
+
+        if bundleId.hasPrefix("com.anthropic.") || name == "claude" {
+            return .claude
+        }
+        if bundleId.hasPrefix("com.openai.") || name == "chatgpt" || name == "codex" {
+            return .codex
+        }
+        return nil
     }
 
     @objc private func appearanceChanged() {
@@ -436,6 +484,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if hasClaude && hasCodex && viewModel.showClaude && viewModel.showCodex {
                     displayMenu.addItem(NSMenuItem.separator())
 
+                    let followItem = NSMenuItem(title: "Follow Active App", action: #selector(toggleFollowActiveApp), keyEquivalent: "")
+                    followItem.target = self
+                    followItem.state = viewModel.followActiveApp ? .on : .off
+                    followItem.toolTip = "Show Claude usage when a Claude app is in front, Codex usage when ChatGPT or Codex is in front"
+                    displayMenu.addItem(followItem)
+
                     let intervalMenu = NSMenu()
 
                     // Add Manual option (tag = 0 means no auto-switching)
@@ -610,6 +664,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         viewModel.showOnly5hr = false
         viewModel.showOnlyWeekly = true
         NotificationCenter.default.post(name: NSNotification.Name("SettingsChanged"), object: nil)
+    }
+
+    @objc private func toggleFollowActiveApp() {
+        viewModel.followActiveApp.toggle()
+        if !viewModel.followActiveApp {
+            focusProvider = nil
+            syncCurrentProvider(preferSavedSelection: true)
+            restartProviderAnimation()
+        }
+        rebuildMenu()
     }
 
     @objc private func toggleShowClaude() {
@@ -1113,6 +1177,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func syncCurrentProvider(preferSavedSelection: Bool = false, persistPreference: Bool = false) {
+        // A Claude/ChatGPT/Codex app in front wins over saved selection and timer.
+        if viewModel.followActiveApp, let focusProvider, canDisplay(focusProvider) {
+            setCurrentProvider(focusProvider, persistPreference: false)
+            return
+        }
+
         let preferredSelection = preferSavedSelection ? preferredProvider : currentProvider
 
         guard let resolvedProvider = resolveProvider(preferred: preferredSelection) else {
@@ -1127,6 +1197,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         syncCurrentProvider()
 
         guard viewModel.shouldAnimateProviders else {
+            return
+        }
+
+        // Hold on the focused app's provider instead of flipping under it.
+        if viewModel.followActiveApp, let focusProvider, canDisplay(focusProvider) {
             return
         }
 

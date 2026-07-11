@@ -4,9 +4,9 @@ PROJECT_NAME = JustaUsageBar
 SCHEME = JustaUsageBar
 RELEASE_APP_NAME = Usagebar
 BUILD_DIR = build
-RELEASE_DIR = $(BUILD_DIR)/Release
-APP_PATH = $(RELEASE_DIR)/$(RELEASE_APP_NAME).app
 ZIP_PATH = $(BUILD_DIR)/$(RELEASE_APP_NAME).zip
+DERIVED_DATA_DIR ?= $(TMPDIR)UsagebarDerivedData
+BUILT_APP_PATH = $(DERIVED_DATA_DIR)/Build/Products/Release/$(RELEASE_APP_NAME).app
 
 # Build debug
 build:
@@ -17,14 +17,15 @@ build:
 
 # Build release and create zip for distribution
 release:
-	@mkdir -p $(RELEASE_DIR)
+	@mkdir -p $(BUILD_DIR)
+	@rm -rf $(BUILD_DIR)/Release $(ZIP_PATH) $(DERIVED_DATA_DIR)
 	xcodebuild -project $(PROJECT_NAME).xcodeproj \
 		-scheme $(SCHEME) \
 		-configuration Release \
-		-derivedDataPath $(BUILD_DIR)/DerivedData \
+		-derivedDataPath $(DERIVED_DATA_DIR) \
+		-quiet \
 		build
-	@cp -R $(BUILD_DIR)/DerivedData/Build/Products/Release/$(RELEASE_APP_NAME).app $(RELEASE_DIR)/
-	@cd $(RELEASE_DIR) && zip -r ../../$(ZIP_PATH) $(RELEASE_APP_NAME).app
+	@cd $(dir $(BUILT_APP_PATH)) && COPYFILE_DISABLE=1 zip -r -X $(abspath $(ZIP_PATH)) $(RELEASE_APP_NAME).app
 	@echo ""
 	@echo "Release built: $(ZIP_PATH)"
 	@echo "SHA256: $$(shasum -a 256 $(ZIP_PATH) | cut -d' ' -f1)"
@@ -35,7 +36,7 @@ release:
 	@echo "  3. Update Casks/usagebar.rb and compatibility casks with the SHA256 above"
 
 clean:
-	rm -rf $(BUILD_DIR)
+	rm -rf $(BUILD_DIR) $(DERIVED_DATA_DIR)
 	xcodebuild -project $(PROJECT_NAME).xcodeproj \
 		-scheme $(SCHEME) \
 		clean

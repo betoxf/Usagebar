@@ -1,199 +1,164 @@
-# Usagebar
+<div align="center">
+  <img src="assets/brand/usagebar-logo.png" alt="Usagebar" width="760">
+
+  <p><strong>Claude and Codex usage limits, directly in your macOS menu bar.</strong></p>
+  <p>A private, native utility for checking rolling and weekly limits without breaking focus.</p>
+
+  <p>
+    <a href="https://github.com/betoxf/Usagebar/actions/workflows/ci.yml"><img src="https://github.com/betoxf/Usagebar/actions/workflows/ci.yml/badge.svg?branch=main" alt="Build"></a>
+    <a href="https://github.com/betoxf/Usagebar/releases/latest"><img src="https://img.shields.io/github/v/release/betoxf/Usagebar?display_name=tag&sort=semver" alt="Latest release"></a>
+    <img src="https://img.shields.io/badge/macOS-14%2B-111827" alt="macOS 14 or newer">
+    <img src="https://img.shields.io/badge/Swift-5-F05138" alt="Swift 5">
+    <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-2563EB" alt="MIT license"></a>
+  </p>
+
+  <p>
+    <a href="#installation">Install</a> ·
+    <a href="#how-it-works">How it works</a> ·
+    <a href="docs/ARCHITECTURE.md">Architecture</a> ·
+    <a href="CONTRIBUTING.md">Contributing</a> ·
+    <a href="SECURITY.md">Security</a>
+  </p>
+</div>
 
 <p align="center">
-  <img src="images/image3.png" alt="Usagebar screenshot" width="600">
+  <img src="images/demo.gif" alt="Usagebar showing Claude and Codex limits in the macOS menu bar" width="760">
 </p>
 
-A lightweight macOS menu bar app that shows your **Claude** and **Codex** (OpenAI) usage at a glance -- 5-hour rolling window and 7-day limits, right in your menu bar.
+## Why Usagebar
 
-<p align="center">
-  <img src="images/demo.gif" alt="Usagebar demo" width="600">
-</p>
+Usage limits matter most while you are working. Usagebar keeps the current five-hour window and weekly allowance visible in the menu bar, then gets out of the way.
 
-![macOS](https://img.shields.io/badge/macOS-14.0%2B-blue)
-![Swift](https://img.shields.io/badge/Swift-5.9-orange)
-![License](https://img.shields.io/badge/License-MIT-green)
+| Capability | What it gives you |
+| --- | --- |
+| Claude + Codex | Track either provider or switch between both from one status item. |
+| At-a-glance limits | See rolling-window and weekly percentages without opening a browser. |
+| Native controls | Refresh, change display mode, switch provider cadence, and launch at login. |
+| Local credential discovery | Reuse supported Claude CLI and Codex CLI sessions already present on the Mac. |
+| Privacy-first operation | No Usagebar account, telemetry, analytics, or intermediary backend. |
+| Lightweight runtime | A native Swift menu-bar app with no web runtime or bundled service. |
 
-## Install
+## Installation
+
+### Homebrew (recommended)
 
 ```bash
-brew install betoxf/tap/usagebar
+brew install --cask betoxf/tap/usagebar
 ```
 
-That's it. If you have Claude CLI or Codex CLI logged in, the app auto-detects your credentials -- zero config.
+Upgrade later with `brew update && brew upgrade --cask usagebar`.
 
-## Update
+### Download a release
 
-If you already have the app installed, update it with:
+Download `Usagebar.zip` from the [latest release](https://github.com/betoxf/Usagebar/releases/latest), move `Usagebar.app` to `/Applications`, and launch it.
+
+> [!NOTE]
+> Current release artifacts are not notarized. The Homebrew cask clears the quarantine attribute during installation. If you prefer not to do that, build from source.
+
+### Requirements
+
+- macOS 14 Sonoma or newer
+- A Claude and/or Codex account
+- For zero-setup discovery, an authenticated Claude CLI or Codex CLI session
+
+## Quick start
+
+1. Install and launch Usagebar.
+2. If you already use the provider CLIs, Usagebar discovers their local credentials automatically.
+3. Click the menu-bar item to refresh, choose display modes, or configure provider switching.
+
+If a provider is not detected, authenticate its CLI and ask Usagebar to rediscover credentials:
 
 ```bash
-brew update
-brew upgrade --cask usagebar
-```
-
-If you installed manually, download the latest `Usagebar.app` from Releases and replace the copy in `/Applications`.
-
-> **No Homebrew?** Run this instead:
-> ```bash
-> /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/betoxf/Usagebar/main/install.sh)"
-> ```
-
----
-
-## Quick Start
-
-1. **Install** -- `brew install betoxf/tap/usagebar`
-2. **Launch** -- open Usagebar from Applications (or `open -a Usagebar`)
-3. **Done** -- if you use Claude CLI or Codex CLI, credentials are detected automatically
-
-If you don't use the CLIs, click the menu bar item > **Setup Usage Tracking** > **Sign in with Browser**.
-
----
-
-## Features
-
-- Shows 5-hour and 7-day usage percentages for **Claude** and **Codex**
-- Auto-detects Claude CLI and Codex CLI credentials (OAuth) -- zero setup
-- Smooth dissolve animation alternating between providers in the menu bar
-- Configurable switch interval (5s / 8s / 10s / 15s / 30s)
-- Display modes: Both percentages, 5h only, or Weekly only
-- Toggle providers: show Claude, Codex, or both
-- Temporary Codex `2x` promo badge with compact dropdown countdown/date display while the promo is active
-- Claude peak-hours indicator with animated downward badge during faster-consumption windows
-- Auto-refreshes OAuth tokens when expired
-- Falls back to browser session login for Claude if CLI not available
-- Launch at Login support
-- Minimal resource usage (~0% CPU when idle)
-
-## Menu Bar
-
-| Provider | Label | Style |
-|----------|-------|-------|
-| Claude | `✳︎ Claude` | Anthropic orange accents |
-| Codex | `> Codex` | Terminal icon, subtle blue accents |
-
-When both providers are active, the menu bar alternates between them with a smooth dissolve animation. Left-click to switch manually, or use "Switch Every > Manual" for click-only mode.
-
-When OpenAI is running a temporary Codex limit boost, the menu bar can show a compact `2x` badge before the Codex 5h value. In the dropdown, the Codex row alternates between time remaining and the end date, and the badge disappears automatically after the promo expires.
-
-During Anthropic weekday peak hours, Claude can show an animated downward indicator before the Claude 5h value. In the dropdown, the Claude section adds a compact `↓ Peak hour` note, and hovering the menu bar item shows a `faster consumption` tooltip.
-
-**Click the menu bar item** to see:
-
-| Option | What it does |
-|--------|-------------|
-| Usage details | Current % and time until reset for each provider |
-| Refresh (Cmd+R) | Manually refresh usage data |
-| Display > Show Both / 5h Only / Weekly Only | Change what numbers are shown |
-| Display > Show Promo Visibility | Show or hide the temporary Codex `2x` promo badge when available |
-| Display > Show Claude / Show Codex | Toggle which providers appear |
-| Display > Switch Every | Animation interval (Manual / 5s / 8s / 10s / 15s / 30s) |
-| Show Icon | Toggle the provider label above the numbers |
-| Launch at Login | Start automatically on macOS login |
-| Sign Out | Sign out of Claude or Codex independently |
-
-## Setup Details
-
-### Automatic (Recommended)
-
-The app auto-detects credentials on launch:
-
-**Claude CLI** -- reads Claude OAuth credentials from the macOS Keychain item `Claude Code-credentials`, with `~/.claude/.credentials.json` as a fallback on setups that still write the file
-```bash
-# If you haven't already:
-npm install -g @anthropic-ai/claude-code
 claude login
-```
-
-To verify Claude is logged in and the Keychain item exists:
-```bash
-security find-generic-password -s "Claude Code-credentials"
-```
-
-**Codex CLI** -- reads `~/.codex/auth.json`
-```bash
-# If you haven't already:
-npm install -g @openai/codex
 codex login
 ```
 
-### Manual (Claude only)
+Claude also supports an in-app browser-session fallback from **Setup Usage Tracking**.
 
-1. Click menu bar > **Setup Usage Tracking** > **Sign in with Browser**
-2. Log in to claude.ai normally -- credentials are extracted automatically
-3. If auto-extraction fails, use **Manual Entry** with session key + org ID from DevTools
+## Menu-bar controls
 
-## Common Commands
+| Control | Behavior |
+| --- | --- |
+| Refresh (`⌘R`) | Fetch the latest available limits immediately. |
+| Display mode | Show both windows, the five-hour window only, or the weekly window only. |
+| Provider visibility | Show Claude, Codex, or both. |
+| Switch cadence | Rotate providers automatically or switch manually with a left click. |
+| Launch at Login | Register or remove Usagebar as a macOS login item. |
+| Sign out | Reset the selected provider's Usagebar state; provider CLI sessions remain provider-owned. |
 
-| Action | Command |
-|--------|---------|
-| Install | `brew install betoxf/tap/usagebar` |
-| Update | `brew update && brew upgrade --cask usagebar` |
-| Uninstall | `brew uninstall usagebar` |
-| Check version | `brew info betoxf/tap/usagebar` |
-| Check auto-start | Menu bar > look for checkmark on "Launch at Login" |
-| Launch manually | `open -a Usagebar` |
+## How it works
 
-## How It Works
+Usagebar is a local status-bar client. It discovers credentials already stored by provider tools, requests usage directly from the provider, normalizes the response, and renders it with AppKit.
 
-### Authentication Priority
+```text
+Claude CLI / Keychain ─┐
+                       ├─> local credential discovery ─> provider API ─> menu-bar status
+Codex CLI auth.json ───┘
+```
 
-| Priority | Method | Source | Auto-refresh |
-|----------|--------|--------|-------------|
-| 1 | Claude OAuth | Keychain `Claude Code-credentials` or `~/.claude/.credentials.json` | Yes |
-| 2 | Claude Web Session | Browser cookie extraction | No |
-| 3 | Codex OAuth | `~/.codex/auth.json` | Yes |
+The app refreshes in the background every two minutes by default. OAuth access tokens are refreshed when supported by the provider session. See [Architecture](docs/ARCHITECTURE.md) for component boundaries, credential priority, and network destinations.
 
-### API Endpoints
+## Privacy and security
 
-| Provider | Endpoint |
-|----------|----------|
-| Claude (OAuth) | `GET api.anthropic.com/api/oauth/usage` |
-| Claude (Web) | `GET claude.ai/api/organizations/{orgId}/usage` |
-| Codex | `GET chatgpt.com/backend-api/wham/usage` |
+- Usage data travels directly between your Mac and Anthropic or OpenAI.
+- Usagebar does not operate a backend and does not collect telemetry or analytics.
+- CLI credential files are read locally and are never copied to a Usagebar service.
+- Claude browser-session credentials saved by the app are encrypted locally with AES-256-GCM using a device-derived key.
+- Provider APIs and authentication formats can change independently of Usagebar.
 
-Usage refreshes every 60 seconds. OAuth tokens refresh automatically when expired.
+Report suspected vulnerabilities privately according to the [security policy](SECURITY.md). Never include tokens, cookies, session keys, or unredacted credential files in an issue.
 
-### Temporary Indicators
+## Build from source
 
-| Provider | Indicator | Behavior |
-|----------|-----------|----------|
-| Codex | `2x` badge | Shows while the temporary OpenAI limit boost is active, alternates compact dropdown text between time left and end date, and auto-hides after expiry |
-| Claude | Downward peak-hours badge | Shows during Anthropic weekday peak hours when limits are consumed faster, adds `↓ Peak hour` in the dropdown, and exposes a hover tooltip |
-
-## Troubleshooting
-
-| Problem | Fix |
-|---------|-----|
-| "Session expired" (Claude) | Run `claude login`, then verify `security find-generic-password -s "Claude Code-credentials"` returns an item; if not, sign out and authenticate again |
-| Codex not showing | Run `codex login`, verify `~/.codex/auth.json` exists |
-| Claude shows `0%` or `--` after restart | Click Refresh (Cmd+R). If it stays stale, run `claude login` again and confirm the `Claude Code-credentials` Keychain item exists |
-| Usage shows 0% | Click Refresh (Cmd+R) or wait for next auto-refresh. Very low usage can legitimately show `0%` for the weekly window |
-| Not starting at login | Toggle "Launch at Login" in menu, or check System Settings > Login Items |
-
-## Build from Source
+You need Xcode 15 or newer with the macOS 14 SDK.
 
 ```bash
 git clone https://github.com/betoxf/Usagebar.git
 cd Usagebar
-make release
-# App at build/DerivedData/Build/Products/Release/Usagebar.app -- drag to /Applications
+./script/build_and_run.sh --verify
 ```
 
-## Privacy & Security
+Create a distributable archive with `make release`. The clean archive is written to `build/Usagebar.zip`.
 
-- All credentials stored locally (AES-256-GCM encrypted, machine-locked)
-- OAuth credentials read locally from CLI-managed auth stores (Claude Keychain or CLI files, not copied to a server)
-- No telemetry, no analytics, no third-party services
-- Not affiliated with Anthropic or OpenAI
-- Open source (MIT)
+## Repository map
+
+```text
+JustaUsageBar/       macOS application source and asset catalog
+  Models/            provider-neutral usage models
+  Services/          credential discovery and provider API clients
+  ViewModels/        refresh orchestration and persisted preferences
+  Views/             status item, menus, setup, and settings UI
+assets/brand/        approved logo and standalone icon masters
+Casks/               Homebrew cask definitions
+docs/                architecture, brand, and release documentation
+script/              local build and run entrypoint
+.github/              CI, issue forms, and pull request guidance
+```
+
+## Project documentation
+
+| Document | Purpose |
+| --- | --- |
+| [Architecture](docs/ARCHITECTURE.md) | Runtime components, data flow, credentials, and network boundaries. |
+| [Brand assets](docs/BRAND.md) | Approved identity files and usage guidance. |
+| [Contributing](CONTRIBUTING.md) | Local setup, change standards, and validation expectations. |
+| [Releasing](docs/RELEASING.md) | Versioning, artifact, tag, and Homebrew update checklist. |
+| [Security](SECURITY.md) | Supported versions and private reporting process. |
+| [Code of Conduct](CODE_OF_CONDUCT.md) | Community participation expectations. |
+
+## Contributing
+
+Issues and focused pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md), use the repository issue forms, and keep provider credentials out of logs and screenshots.
+
+## Acknowledgements
+
+- [CodexBar](https://github.com/steipete/CodexBar) for authentication-flow inspiration
+- Anthropic for Claude and Claude Code
+- OpenAI for Codex
+
+Usagebar is an independent open-source project and is not affiliated with, endorsed by, or sponsored by Anthropic or OpenAI.
 
 ## License
 
-MIT
-
-## Acknowledgments
-
-- **[CodexBar](https://github.com/steipete/CodexBar)** -- Authentication flow and browser session extraction inspired by this excellent Codex usage bar
-- **Anthropic** -- Claude API and Claude Code CLI
-- **OpenAI** -- Codex API and usage tracking
+Usagebar is available under the [MIT License](LICENSE).

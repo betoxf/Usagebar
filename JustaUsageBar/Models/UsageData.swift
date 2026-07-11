@@ -52,6 +52,10 @@ struct UsageData {
     var weeklyLimit: Int = 100
     var weeklyResetAt: Date?
 
+    // Fable weekly limit (only present on plans with Fable access)
+    var fableUsed: Int?
+    var fableResetAt: Date?
+
     var fiveHourPercentage: Double {
         guard fiveHourLimit > 0 else { return 0 }
         return min(Double(fiveHourUsed) / Double(fiveHourLimit) * 100, 100)
@@ -69,6 +73,15 @@ struct UsageData {
 
     var timeUntilWeeklyReset: String {
         guard let resetAt = weeklyResetAt else { return "--" }
+        return formatTimeUntil(resetAt)
+    }
+
+    var hasFableData: Bool {
+        fableUsed != nil
+    }
+
+    var timeUntilFableReset: String {
+        guard let resetAt = fableResetAt else { return "--" }
         return formatTimeUntil(resetAt)
     }
 

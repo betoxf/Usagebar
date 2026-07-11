@@ -26,13 +26,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var credentialsWindow: NSWindow?
     private let preferredProviderDefaultsKey = "preferredDisplayProvider"
 
-    // Animation state
+    // Provider switching state
     private var currentProvider: DisplayProvider = .claude
     private var providerSwitchTimer: Timer?
-    private var promoAnimationTimer: Timer?
-    private var promoAnimationPhase: CGFloat = 0
-    private var promoHeaderShowsCountdown = true
-    private var lastPromoHeaderSlot: Int?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusItem()
@@ -45,7 +41,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if viewModel.hasCredentials {
             syncCurrentProvider(preferSavedSelection: true, persistPreference: true)
             restartProviderAnimation()
-            restartPromoAnimation()
         } else {
             showSetupStatus()
         }
@@ -84,7 +79,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if viewModel.hasCredentials {
             syncCurrentProvider()
             restartProviderAnimation()
-            restartPromoAnimation()
             updateStatusImage()
         } else {
             showSetupStatus()
@@ -95,7 +89,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func usageDataChanged() {
         if viewModel.hasCredentials {
             syncCurrentProvider()
-            restartPromoAnimation()
             updateStatusImage()
         } else {
             showSetupStatus()
@@ -117,7 +110,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showSetupStatus() {
         stopProviderAnimation()
-        stopPromoAnimation()
         guard let button = statusItem.button else { return }
 
         let width: CGFloat = 50
@@ -199,7 +191,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 case .none:
                     ""
                 }
-                let peakLabel = viewModel.shouldShowClaudePeakIndicator ? "  ↓ Peak hour" : ""
 
                 let headerString = NSMutableAttributedString()
                 headerString.append(NSAttributedString(string: "\u{2733}\u{FE0E} Claude  ", attributes: [
@@ -213,12 +204,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     .font: NSFont.systemFont(ofSize: 11, weight: .regular),
                     .foregroundColor: NSColor.secondaryLabelColor
                 ]))
-                if !peakLabel.isEmpty {
-                    headerString.append(NSAttributedString(string: peakLabel, attributes: [
-                        .font: NSFont.systemFont(ofSize: 10, weight: .regular),
-                        .foregroundColor: anthropicOrange.withAlphaComponent(0.9)
-                    ]))
-                }
 
                 claudeHeader.attributedTitle = headerString
                 menu.addItem(claudeHeader)
@@ -232,13 +217,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     let fiveHourColor = usageHighlightColor(
                         percentage: fiveHour,
                         highThreshold: 90,
-                        accentColor: animatedClaudeAccentColor(),
+                        accentColor: brandClaudeColor,
                         fallback: NSColor.labelColor
                     )
                     let weeklyColor = usageHighlightColor(
                         percentage: weekly,
                         highThreshold: 80,
-                        accentColor: animatedClaudeAccentColor(phaseShift: 0.14),
+                        accentColor: brandClaudeColor,
                         fallback: NSColor.labelColor
                     )
 
@@ -270,6 +255,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     weeklyItem.attributedTitle = weeklyString
                     menu.addItem(weeklyItem)
 
+                    if viewModel.usageData.hasFableData {
+                        let fable = viewModel.usageData.fableUsed ?? 0
+                        let fableReset = viewModel.usageData.timeUntilFableReset
+                        let fableColor = usageHighlightColor(
+                            percentage: fable,
+                            highThreshold: 80,
+                            accentColor: brandClaudeColor,
+                            fallback: NSColor.labelColor
+                        )
+
+                        let fableItem = NSMenuItem(title: "  Fable: \(fable)%  \u{2022}  \(fableReset)", action: nil, keyEquivalent: "")
+                        fableItem.isEnabled = false
+                        let fableAttrs: [NSAttributedString.Key: Any] = [
+                            .font: NSFont.systemFont(ofSize: 11, weight: .regular)
+                        ]
+                        let fableString = NSMutableAttributedString(string: "  Fable: ", attributes: fableAttrs)
+                        fableString.append(NSAttributedString(string: "\(fable)", attributes: [
+                            .font: NSFont.systemFont(ofSize: 11, weight: .medium),
+                            .foregroundColor: fableColor
+                        ]))
+                        fableString.append(NSAttributedString(string: "%  \u{2022}  \(fableReset)", attributes: fableAttrs))
+                        fableItem.attributedTitle = fableString
+                        menu.addItem(fableItem)
+                    }
+
                     if let claudeError = viewModel.claudeError {
                         menu.addItem(makeStatusMessageItem(claudeError, color: .systemOrange))
                         if shouldPromptClaudeAuthentication {
@@ -299,13 +309,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // Build header with plan type
                 let codex = viewModel.codexUsageData
                 let planInfo = codex.planType != "unknown" ? codex.planType.capitalized : ""
-                let promoLabel: String = {
-                    guard viewModel.isPromoVisibilityInWindow else { return "" }
-                    if promoHeaderShowsCountdown, let remaining = viewModel.codexPromoTimeRemainingText {
-                        return "• 2x • \(remaining)"
-                    }
-                    return "• 2x • \(viewModel.codexPromoEndDisplayText)"
-                }()
 
                 let headerString = NSMutableAttributedString()
                 headerString.append(NSAttributedString(string: "Codex  ", attributes: [
@@ -315,12 +318,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if !planInfo.isEmpty {
                     headerString.append(NSAttributedString(string: planInfo, attributes: [
                         .font: NSFont.systemFont(ofSize: 11, weight: .regular),
-                        .foregroundColor: NSColor.secondaryLabelColor
-                    ]))
-                }
-                if !promoLabel.isEmpty {
-                    headerString.append(NSAttributedString(string: promoLabel, attributes: [
-                        .font: NSFont.systemFont(ofSize: 10, weight: .regular),
                         .foregroundColor: NSColor.secondaryLabelColor
                     ]))
                 }
@@ -336,7 +333,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     let primaryColor = usageHighlightColor(
                         percentage: primary,
                         highThreshold: 90,
-                        accentColor: animatedCodexAccentColor(),
+                        accentColor: brandCodexColor,
                         fallback: NSColor.labelColor
                     )
 
@@ -360,7 +357,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         let secondaryColor = usageHighlightColor(
                             percentage: secondary,
                             highThreshold: 80,
-                            accentColor: animatedCodexAccentColor(phaseShift: 0.14),
+                            accentColor: brandCodexColor,
                             fallback: NSColor.labelColor
                         )
 
@@ -416,14 +413,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onlyWeeklyItem.target = self
             onlyWeeklyItem.state = viewModel.showOnlyWeekly ? .on : .off
             displayMenu.addItem(onlyWeeklyItem)
-
-            if hasCodex {
-                let promoVisibilityItem = NSMenuItem(title: "Show Promo Visibility", action: #selector(togglePromoVisibility), keyEquivalent: "")
-                promoVisibilityItem.target = self
-                promoVisibilityItem.state = viewModel.showPromoVisibility ? .on : .off
-                promoVisibilityItem.isEnabled = viewModel.isPromoVisibilityInWindow
-                displayMenu.addItem(promoVisibilityItem)
-            }
 
             // Provider toggles
             if hasClaude || hasCodex {
@@ -620,11 +609,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func showOnlyWeekly() {
         viewModel.showOnly5hr = false
         viewModel.showOnlyWeekly = true
-        NotificationCenter.default.post(name: NSNotification.Name("SettingsChanged"), object: nil)
-    }
-
-    @objc private func togglePromoVisibility() {
-        viewModel.showPromoVisibility.toggle()
         NotificationCenter.default.post(name: NSNotification.Name("SettingsChanged"), object: nil)
     }
 
@@ -1154,6 +1138,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.updateStatusImage()
             }
         }
+        // Let the system coalesce timer wakeups to save energy.
+        providerSwitchTimer?.tolerance = viewModel.animationInterval * 0.1
     }
 
     private func stopProviderAnimation() {
@@ -1166,55 +1152,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if viewModel.hasCredentials {
             startProviderAnimation()
             updateStatusImage()
-        }
-    }
-
-    private func startPromoAnimation() {
-        stopPromoAnimation()
-
-        guard shouldAnimateAnyAccentState else {
-            promoAnimationPhase = 0
-            promoHeaderShowsCountdown = true
-            lastPromoHeaderSlot = nil
-            return
-        }
-
-        promoAnimationTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-
-                guard self.shouldAnimateAnyAccentState else {
-                    self.stopPromoAnimation()
-                    self.updateStatusImage()
-                    return
-                }
-
-                self.promoAnimationPhase = (self.promoAnimationPhase + 0.0225).truncatingRemainder(dividingBy: 1.0)
-                if self.shouldAnimateMenuMetadata {
-                    let currentSlot = Int(Date().timeIntervalSinceReferenceDate / 2.0)
-                    if self.lastPromoHeaderSlot != currentSlot {
-                        self.lastPromoHeaderSlot = currentSlot
-                        self.promoHeaderShowsCountdown = currentSlot.isMultiple(of: 2)
-                        self.rebuildMenu()
-                    }
-                }
-
-                self.updateStatusImage()
-            }
-        }
-    }
-
-    private func stopPromoAnimation() {
-        promoAnimationTimer?.invalidate()
-        promoAnimationTimer = nil
-        lastPromoHeaderSlot = nil
-    }
-
-    private func restartPromoAnimation() {
-        if viewModel.hasCredentials && shouldAnimateAnyAccentState {
-            startPromoAnimation()
-        } else {
-            stopPromoAnimation()
         }
     }
 
@@ -1232,7 +1169,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         button.image = image
-        button.toolTip = statusTooltip(for: currentProvider)
+        button.toolTip = nil
     }
 
     private func createProviderImage(for provider: DisplayProvider) -> (NSImage, CGFloat) {
@@ -1250,11 +1187,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let showIcon = viewModel.showIcon
         let showOnly5hr = viewModel.showOnly5hr
         let showOnlyWeekly = viewModel.showOnlyWeekly
-        let showPeakIndicator = viewModel.shouldShowClaudePeakIndicator && !showOnlyWeekly
 
         var width: CGFloat = 80
         if showOnly5hr || showOnlyWeekly { width = 50 }
-        if showPeakIndicator { width += 14 }
 
         let height: CGFloat = showIcon ? 22 : 16
 
@@ -1267,9 +1202,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var yOffset: CGFloat = 0
 
         if showIcon {
-            let starColor = shouldAnimateClaudeBrandAccent
-                ? animatedClaudeAccentColor(phaseShift: 0.12)
-                : brandClaudeColor
+            let starColor = brandClaudeColor
             let starAttributes: [NSAttributedString.Key: Any] = [
                 .font: NSFont.systemFont(ofSize: 7, weight: .bold),
                 .foregroundColor: starColor
@@ -1298,13 +1231,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let fiveHourColor = usageHighlightColor(
             percentage: fiveHour,
             highThreshold: 90,
-            accentColor: animatedClaudeAccentColor(),
+            accentColor: brandClaudeColor,
             fallback: textColor
         )
         let weeklyColor = usageHighlightColor(
             percentage: weekly,
             highThreshold: 80,
-            accentColor: animatedClaudeAccentColor(phaseShift: 0.14),
+            accentColor: brandClaudeColor,
             fallback: textColor
         )
 
@@ -1347,30 +1280,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             valuesString.append(NSAttributedString(string: "%", attributes: percentWAttributes))
         }
 
-        if showPeakIndicator {
-            let symbolConfig = NSImage.SymbolConfiguration(pointSize: 9, weight: .semibold)
-            let arrowSize = NSSize(width: 10, height: 10)
-            let badgeGap: CGFloat = 4
-            let valuesX = (width - valuesString.size().width) / 2
-            let arrowX = max(0, valuesX - badgeGap - arrowSize.width)
-            let badgeY = (height - arrowSize.height) / 2 - 0.2
-
-            if let arrowSymbol = NSImage(
-                systemSymbolName: "arrow.down.circle.fill",
-                accessibilityDescription: "Claude peak hour"
-            )?.withSymbolConfiguration(symbolConfig) {
-                let tintedSymbol = arrowSymbol.copy() as? NSImage ?? arrowSymbol
-                tintedSymbol.lockFocus()
-                animatedClaudeAccentColor(phaseShift: 0.34).set()
-                NSRect(origin: .zero, size: tintedSymbol.size).fill(using: .sourceAtop)
-                tintedSymbol.unlockFocus()
-                tintedSymbol.draw(in: NSRect(x: arrowX, y: badgeY, width: arrowSize.width, height: arrowSize.height))
-            }
-
-            valuesString.draw(at: NSPoint(x: valuesX, y: yOffset))
-        } else {
-            valuesString.draw(at: NSPoint(x: (width - valuesString.size().width) / 2, y: yOffset))
-        }
+        valuesString.draw(at: NSPoint(x: (width - valuesString.size().width) / 2, y: yOffset))
 
         image.unlockFocus()
         image.isTemplate = false
@@ -1383,11 +1293,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let showIcon = viewModel.showIcon
         let showOnly5hr = viewModel.showOnly5hr
         let showOnlyWeekly = viewModel.showOnlyWeekly
-        let showPromo = viewModel.shouldShowCodexPromo && !showOnlyWeekly
 
         var width: CGFloat = 80
         if showOnly5hr || showOnlyWeekly { width = 50 }
-        if showPromo { width += 14 }
 
         let height: CGFloat = showIcon ? 22 : 16
 
@@ -1404,9 +1312,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Draw icon and "Codex" label (no gradient, just black/white)
             let iconFont = NSFont.systemFont(ofSize: 6, weight: .regular)
             let iconString = ">_"
-            let codexIconColor = shouldAnimateCodexBrandAccent
-                ? animatedCodexAccentColor(phaseShift: 0.12)
-                : codexBrandColor
+            let codexIconColor = codexBrandColor
 
             let iconAttrs: [NSAttributedString.Key: Any] = [
                 .font: iconFont,
@@ -1439,13 +1345,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let primaryColor = usageHighlightColor(
             percentage: primary,
             highThreshold: 90,
-            accentColor: animatedCodexAccentColor(),
+            accentColor: brandCodexColor,
             fallback: textColor
         )
         let secondaryColor = usageHighlightColor(
             percentage: secondary,
             highThreshold: 80,
-            accentColor: animatedCodexAccentColor(phaseShift: 0.14),
+            accentColor: brandCodexColor,
             fallback: textColor
         )
 
@@ -1489,30 +1395,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             valuesString.append(NSAttributedString(string: "%", attributes: percentSecondaryAttributes))
         }
 
-        if showPromo {
-            let promo2Attributes: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: 9, weight: .semibold),
-                .foregroundColor: animatedCodexAccentColor(phaseShift: 0.08)
-            ]
-            let promoXAttributes: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: 9, weight: .bold),
-                .foregroundColor: animatedCodexAccentColor(phaseShift: 0.2)
-            ]
-
-            let promoString = NSMutableAttributedString()
-            promoString.append(NSAttributedString(string: "2", attributes: promo2Attributes))
-            promoString.append(NSAttributedString(string: "x", attributes: promoXAttributes))
-
-            let promoGap: CGFloat = 4
-            let valuesX = (width - valuesString.size().width) / 2
-            let promoX = max(0, valuesX - promoGap - promoString.size().width)
-            let promoY = (height - promoString.size().height) / 2 - (promoString.size().height * 0.2)
-
-            promoString.draw(at: NSPoint(x: promoX, y: promoY))
-            valuesString.draw(at: NSPoint(x: valuesX, y: yOffset))
-        } else {
-            valuesString.draw(at: NSPoint(x: (width - valuesString.size().width) / 2, y: yOffset))
-        }
+        valuesString.draw(at: NSPoint(x: (width - valuesString.size().width) / 2, y: yOffset))
 
         image.unlockFocus()
         image.isTemplate = false
@@ -1525,49 +1408,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSColor(red: 0.83, green: 0.53, blue: 0.30, alpha: 1.0)
     }
 
-    private func shouldAnimateUsageHighlight(percentage: Int, highThreshold: Int) -> Bool {
-        percentage == 0 || percentage >= highThreshold
-    }
-
-    private var shouldAnimateClaudeBrandAccent: Bool {
-        canDisplay(.claude) && viewModel.shouldAnimateClaudeUsageActivity
-    }
-
-    private var shouldAnimateClaudeHighlightedValues: Bool {
-        let showFiveHour = !viewModel.showOnlyWeekly
-        let showWeekly = !viewModel.showOnly5hr
-
-        return (
-            (showFiveHour && shouldAnimateUsageHighlight(percentage: viewModel.usageData.fiveHourUsed, highThreshold: 90)) ||
-            (showWeekly && shouldAnimateUsageHighlight(percentage: viewModel.usageData.weeklyUsed, highThreshold: 80))
-        )
-    }
-
-    private var shouldAnimateCodexBrandAccent: Bool {
-        canDisplay(.codex) && viewModel.shouldAnimateCodexUsageActivity
-    }
-
-    private var shouldAnimateCodexHighlightedValues: Bool {
-        let showPrimary = !viewModel.showOnlyWeekly
-        let showSecondary = !viewModel.showOnly5hr
-        let codex = viewModel.codexUsageData
-
-        return (
-            (showPrimary && shouldAnimateUsageHighlight(percentage: codex.primaryUsedPercent, highThreshold: 90)) ||
-            (showSecondary && shouldAnimateUsageHighlight(percentage: codex.secondaryUsedPercent, highThreshold: 80))
-        )
-    }
-
-    private var shouldAnimateMenuMetadata: Bool {
-        viewModel.shouldShowCodexPromo || viewModel.shouldShowClaudePeakIndicator
-    }
-
-    private var shouldAnimateAnyAccentState: Bool {
-        shouldAnimateClaudeBrandAccent ||
-            shouldAnimateCodexBrandAccent ||
-            shouldAnimateClaudeHighlightedValues ||
-            shouldAnimateCodexHighlightedValues ||
-            shouldAnimateMenuMetadata
+    private var brandCodexColor: NSColor {
+        NSColor(red: 0.14, green: 0.73, blue: 0.94, alpha: 1.0)
     }
 
     private func usageHighlightColor(
@@ -1577,51 +1419,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         fallback: NSColor
     ) -> NSColor
     {
-        guard shouldAnimateUsageHighlight(percentage: percentage, highThreshold: highThreshold) else {
-            return fallback
-        }
-        return accentColor
-    }
-
-    private func animatedCodexAccentColor(phaseShift: CGFloat = 0) -> NSColor {
-        let colors = [
-            NSColor(red: 0.15, green: 0.81, blue: 0.63, alpha: 1.0),
-            NSColor(red: 0.14, green: 0.73, blue: 0.94, alpha: 1.0),
-            NSColor(red: 0.33, green: 0.57, blue: 0.99, alpha: 1.0)
-        ]
-
-        let normalizedPhase = (promoAnimationPhase + phaseShift).truncatingRemainder(dividingBy: 1.0)
-        let scaled = normalizedPhase * CGFloat(colors.count)
-        let startIndex = Int(floor(scaled)) % colors.count
-        let endIndex = (startIndex + 1) % colors.count
-        let blend = scaled - CGFloat(startIndex)
-
-        return colors[startIndex].blended(withFraction: blend, of: colors[endIndex]) ?? colors[startIndex]
-    }
-
-    private func animatedClaudeAccentColor(phaseShift: CGFloat = 0) -> NSColor {
-        let colors = [
-            NSColor(red: 0.83, green: 0.53, blue: 0.30, alpha: 1.0),
-            NSColor(red: 0.91, green: 0.67, blue: 0.45, alpha: 1.0),
-            NSColor(red: 0.75, green: 0.42, blue: 0.20, alpha: 1.0)
-        ]
-
-        let normalizedPhase = (promoAnimationPhase + phaseShift).truncatingRemainder(dividingBy: 1.0)
-        let scaled = normalizedPhase * CGFloat(colors.count)
-        let startIndex = Int(floor(scaled)) % colors.count
-        let endIndex = (startIndex + 1) % colors.count
-        let blend = scaled - CGFloat(startIndex)
-
-        return colors[startIndex].blended(withFraction: blend, of: colors[endIndex]) ?? colors[startIndex]
-    }
-
-    private func statusTooltip(for provider: DisplayProvider) -> String? {
-        switch provider {
-        case .claude:
-            return viewModel.shouldShowClaudePeakIndicator ? "Claude peak hour: faster consumption" : nil
-        case .codex:
-            return viewModel.shouldShowCodexPromo ? "Codex 2x usage active" : nil
-        }
+        percentage >= highThreshold ? accentColor : fallback
     }
 
     private var shouldPromptClaudeAuthentication: Bool {

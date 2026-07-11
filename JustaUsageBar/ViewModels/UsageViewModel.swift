@@ -37,7 +37,6 @@ final class UsageViewModel: ObservableObject {
     @AppStorage("showOnlyWeekly") var showOnlyWeekly: Bool = false
     @AppStorage("showClaude") var showClaude: Bool = true
     @AppStorage("showCodex") var showCodex: Bool = true
-    @AppStorage("showPromoVisibility") var showPromoVisibility: Bool = true
     @AppStorage("animationInterval") var animationInterval: Double = 8.0
 
     // Launch at login using SMAppService (macOS 13+)
@@ -67,10 +66,6 @@ final class UsageViewModel: ObservableObject {
 
     private var refreshTask: Task<Void, Never>?
     private var timer: Timer?
-    private var hasObservedClaudeUsageSample = false
-    private var lastClaudeUsageChangeAt: Date?
-    private var hasObservedCodexUsageSample = false
-    private var lastCodexUsageChangeAt: Date?
 
     @AppStorage("hasLaunchedBefore") private var hasLaunchedBefore: Bool = false
 
@@ -145,7 +140,6 @@ final class UsageViewModel: ObservableObject {
 
         do {
             let data = try await ClaudeAPIService.shared.fetchUsage()
-            recordClaudeUsageActivityIfNeeded(newData: data)
             usageData = data
             claudeAuthSource = ClaudeAPIService.shared.lastAuthSource
             claudeError = nil
@@ -166,7 +160,6 @@ final class UsageViewModel: ObservableObject {
 
         do {
             let data = try await CodexAPIService.shared.fetchUsage()
-            recordCodexUsageActivityIfNeeded(newData: data)
             codexUsageData = data
             codexError = nil
         } catch let apiError as APIError {
@@ -194,6 +187,8 @@ final class UsageViewModel: ObservableObject {
                 await self?.refresh()
             }
         }
+        // Generous tolerance lets the system coalesce wakeups and save energy.
+        timer?.tolerance = refreshInterval * 0.1
     }
 
     func stopAutoRefresh() {
@@ -227,120 +222,6 @@ final class UsageViewModel: ObservableObject {
         showClaude && showCodex && hasClaudeCredentials && hasCodexCredentials && animationInterval > 0
     }
 
-    private var codexPromoTimeZone: TimeZone {
-        TimeZone(identifier: "America/Los_Angeles") ?? .current
-    }
-
-    var codexPromoEndDate: Date? {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = codexPromoTimeZone
-        return calendar.date(from: DateComponents(
-            timeZone: codexPromoTimeZone,
-            year: 2026,
-            month: 5,
-            day: 31,
-            hour: 23,
-            minute: 59,
-            second: 59
-        ))
-    }
-
-    /// Temporary Codex promo runs through May 31, 2026 at 11:59 PM PT.
-    var isPromoVisibilityInWindow: Bool {
-        guard let cutoff = codexPromoEndDate else {
-            return false
-        }
-        return Date() <= cutoff
-    }
-
-    var hasCodexProPlan: Bool {
-        codexUsageData.planType
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased() == "pro"
-    }
-
-    var shouldShowCodexPromo: Bool {
-        showPromoVisibility
-            && isPromoVisibilityInWindow
-            && showCodex
-            && hasCodexCredentials
-            && hasCodexProPlan
-    }
-
-    var shouldAnimateClaudeUsageActivity: Bool {
-        guard let lastClaudeUsageChangeAt else {
-            return false
-        }
-
-        return Date().timeIntervalSince(lastClaudeUsageChangeAt) < usageActivityWindow
-    }
-
-    var shouldAnimateCodexUsageActivity: Bool {
-        guard let lastCodexUsageChangeAt else {
-            return false
-        }
-
-        return Date().timeIntervalSince(lastCodexUsageChangeAt) < usageActivityWindow
-    }
-
-    private var claudePeakTimeZone: TimeZone {
-        TimeZone(identifier: "America/Los_Angeles") ?? .current
-    }
-
-    var isClaudePeakHours: Bool {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = claudePeakTimeZone
-
-        let now = Date()
-        let weekday = calendar.component(.weekday, from: now)
-        let isWeekday = (2...6).contains(weekday)
-        guard isWeekday else {
-            return false
-        }
-
-        let hour = calendar.component(.hour, from: now)
-        return hour >= 5 && hour < 11
-    }
-
-    var shouldShowClaudePeakIndicator: Bool {
-        showClaude && hasClaudeCredentials && isClaudePeakHours
-    }
-
-    var codexPromoEndDisplayText: String {
-        guard let endDate = codexPromoEndDate else {
-            return "May 31"
-        }
-
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = codexPromoTimeZone
-        formatter.dateFormat = "MMM d"
-        return formatter.string(from: endDate)
-    }
-
-    var codexPromoTimeRemainingText: String? {
-        guard let endDate = codexPromoEndDate else {
-            return nil
-        }
-
-        let remaining = Int(endDate.timeIntervalSinceNow)
-        guard remaining > 0 else {
-            return nil
-        }
-
-        let days = remaining / 86_400
-        let hours = (remaining % 86_400) / 3_600
-        let minutes = (remaining % 3_600) / 60
-
-        if days > 0 {
-            return "\(days)d \(hours)h left"
-        }
-        if hours > 0 {
-            return "\(hours)h \(minutes)m left"
-        }
-        return "\(max(minutes, 1))m left"
-    }
-
     func saveCredentials(sessionKey: String, organizationId: String) {
         // "__oauth__" / "__detected__*" are sentinels from auto-detect.
         if sessionKey == "__oauth__" || sessionKey.hasPrefix("__detected__") {
@@ -366,8 +247,6 @@ final class UsageViewModel: ObservableObject {
         claudeAuthSource = .none
         usageData = .placeholder
         claudeError = nil
-        hasObservedClaudeUsageSample = false
-        lastClaudeUsageChangeAt = nil
         if !hasCredentials {
             stopAutoRefresh()
         }
@@ -377,8 +256,6 @@ final class UsageViewModel: ObservableObject {
         CodexAPIService.shared.clearCache()
         codexUsageData = .placeholder
         codexError = nil
-        hasObservedCodexUsageSample = false
-        lastCodexUsageChangeAt = nil
         if !hasCredentials {
             stopAutoRefresh()
         }
@@ -415,37 +292,4 @@ final class UsageViewModel: ObservableObject {
         }
     }
 
-    private var usageActivityWindow: TimeInterval {
-        refreshInterval + 5
-    }
-
-    private func recordClaudeUsageActivityIfNeeded(newData: UsageData, now: Date = Date()) {
-        guard hasObservedClaudeUsageSample else {
-            hasObservedClaudeUsageSample = true
-            return
-        }
-
-        let didChange =
-            usageData.fiveHourUsed != newData.fiveHourUsed ||
-            usageData.weeklyUsed != newData.weeklyUsed
-
-        if didChange {
-            lastClaudeUsageChangeAt = now
-        }
-    }
-
-    private func recordCodexUsageActivityIfNeeded(newData: CodexUsageData, now: Date = Date()) {
-        guard hasObservedCodexUsageSample else {
-            hasObservedCodexUsageSample = true
-            return
-        }
-
-        let didChange =
-            codexUsageData.primaryUsedPercent != newData.primaryUsedPercent ||
-            codexUsageData.secondaryUsedPercent != newData.secondaryUsedPercent
-
-        if didChange {
-            lastCodexUsageChangeAt = now
-        }
-    }
 }

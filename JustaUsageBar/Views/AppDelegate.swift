@@ -33,6 +33,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// no matching app is active.
     private var focusProvider: DisplayProvider?
 
+    // Update availability state
+    private var availableUpdateVersion: String?
+    private var lastReleaseCheckAt: Date?
+    private var isUpdateRunning = false
+    nonisolated private static let releaseCheckInterval: TimeInterval = 6 * 3600
+    nonisolated private static let lastAutoUpdateVersionDefaultsKey = "lastAutoUpdateAttemptedVersion"
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupStatusItem()
         setupMenu()
@@ -142,6 +149,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             showSetupStatus()
         }
         rebuildMenu()
+        maybeCheckForUpdateInBackground()
+    }
+
+    // MARK: - Background Update Check
+
+    /// Piggybacks on the regular refresh cycle: at most one release lookup
+    /// every `releaseCheckInterval`, a single HTTPS request, no timers.
+    private func maybeCheckForUpdateInBackground() {
+        let last = lastReleaseCheckAt
+            ?? UserDefaults.standard.object(forKey: Self.lastUpdateCheckAtDefaultsKey) as? Date
+        if let last, Date().timeIntervalSince(last) < Self.releaseCheckInterval {
+            return
+        }
+        lastReleaseCheckAt = Date()
+
+        Task { [weak self] in
+            guard let release = try? await Self.fetchLatestRelease() else { return }
+            self?.handleDiscoveredRelease(release)
+        }
+    }
+
+    private func handleDiscoveredRelease(_ release: ReleaseInfo) {
+        UserDefaults.standard.set(Date(), forKey: Self.lastUpdateCheckAtDefaultsKey)
+
+        let installedVersion = Self.installedAppInfo().version
+        guard release.version.compare(installedVersion, options: .numeric) == .orderedDescending else {
+            if availableUpdateVersion != nil {
+                availableUpdateVersion = nil
+                rebuildMenu()
+                updateStatusImage()
+            }
+            return
+        }
+
+        let isNewDiscovery = availableUpdateVersion != release.version
+        availableUpdateVersion = release.version
+        if isNewDiscovery {
+            rebuildMenu()
+            updateStatusImage()
+
+            let defaults = UserDefaults.standard
+            let lastAttempted = defaults.string(forKey: Self.lastAutoUpdateVersionDefaultsKey)
+            if viewModel.autoUpdate && lastAttempted != release.version {
+                defaults.set(release.version, forKey: Self.lastAutoUpdateVersionDefaultsKey)
+                runUpdate(interactive: false)
+            }
+        }
     }
 
     private func setupStatusItem() {
@@ -558,10 +612,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         menu.addItem(reviewRepoItem)
 
-        // Check for Updates
-        let updateItem = NSMenuItem(title: "Check for Updates", action: #selector(checkForUpdates), keyEquivalent: "u")
-        updateItem.target = self
-        menu.addItem(updateItem)
+        // Check for Updates / update available badge
+        if let updateVersion = availableUpdateVersion {
+            let updateItem = NSMenuItem(title: "Update to v\(updateVersion) (1)", action: #selector(checkForUpdates), keyEquivalent: "u")
+            updateItem.target = self
+            updateItem.attributedTitle = NSAttributedString(
+                string: "Update to v\(updateVersion)  (1)",
+                attributes: [
+                    .font: NSFont.systemFont(ofSize: 13, weight: .semibold),
+                    .foregroundColor: brandClaudeColor
+                ]
+            )
+            menu.addItem(updateItem)
+        } else {
+            let updateItem = NSMenuItem(title: "Check for Updates", action: #selector(checkForUpdates), keyEquivalent: "u")
+            updateItem.target = self
+            menu.addItem(updateItem)
+        }
+
+        // Auto update toggle
+        let autoUpdateItem = NSMenuItem(title: "Update Automatically", action: #selector(toggleAutoUpdate), keyEquivalent: "")
+        autoUpdateItem.target = self
+        autoUpdateItem.state = viewModel.autoUpdate ? .on : .off
+        menu.addItem(autoUpdateItem)
 
         let quitItem = NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quitItem)
@@ -666,6 +739,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.post(name: NSNotification.Name("SettingsChanged"), object: nil)
     }
 
+    @objc private func toggleAutoUpdate() {
+        viewModel.autoUpdate.toggle()
+        rebuildMenu()
+    }
+
     @objc private func toggleFollowActiveApp() {
         viewModel.followActiveApp.toggle()
         if !viewModel.followActiveApp {
@@ -737,6 +815,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func checkForUpdates() {
+        runUpdate(interactive: true)
+    }
+
+    private func runUpdate(interactive: Bool) {
+        guard !isUpdateRunning else { return }
+        isUpdateRunning = true
+
         let appURL = Bundle.main.bundleURL
 
         Task {
@@ -744,24 +829,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 await Self.performUpdateCheck()
             }.value
 
+            isUpdateRunning = false
             persistUpdateCheckMetadata(from: updateResult)
-            rebuildMenu()
 
             switch updateResult {
             case .updated(_):
                 relaunchApplication(at: appURL)
             case .alreadyUpToDate(let status):
-                presentAlert(
-                    title: "Already up to date",
-                    message: alreadyUpToDateMessage(for: status),
-                    style: .informational
-                )
+                availableUpdateVersion = nil
+                rebuildMenu()
+                updateStatusImage()
+                if interactive {
+                    presentAlert(
+                        title: "Already up to date",
+                        message: alreadyUpToDateMessage(for: status),
+                        style: .informational
+                    )
+                }
+            case .stillRollingOut(let status):
+                // The release exists but the Homebrew tap hasn't synced yet.
+                // Not a failure: keep the update badge and retry on a later
+                // background check.
+                UserDefaults.standard.removeObject(forKey: Self.lastAutoUpdateVersionDefaultsKey)
+                // Allow the next background check (and auto-retry) in ~10 minutes.
+                lastReleaseCheckAt = Date().addingTimeInterval(-Self.releaseCheckInterval + 600)
+                rebuildMenu()
+                if interactive {
+                    let version = status.latestRelease?.version ?? "the new version"
+                    presentAlert(
+                        title: "Update on its way",
+                        message: "Usagebar \(version) was just published and is still rolling out. It will install automatically in a bit - nothing to do.",
+                        style: .informational
+                    )
+                }
             case .failed(let status, let message):
-                presentAlert(
-                    title: "Update failed",
-                    message: failureMessage(message, status: status),
-                    style: .warning
-                )
+                rebuildMenu()
+                if interactive {
+                    presentAlert(
+                        title: "Update failed",
+                        message: failureMessage(message, status: status),
+                        style: .warning
+                    )
+                }
             }
         }
     }
@@ -861,11 +970,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private enum UpdateResult {
         case updated(UpdateStatus)
         case alreadyUpToDate(UpdateStatus)
+        case stillRollingOut(UpdateStatus)
         case failed(UpdateStatus, String)
 
         var status: UpdateStatus {
             switch self {
-            case .updated(let status), .alreadyUpToDate(let status), .failed(let status, _):
+            case .updated(let status), .alreadyUpToDate(let status), .stillRollingOut(let status), .failed(let status, _):
                 return status
             }
         }
@@ -958,10 +1068,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard isOutdated else {
                 if let latestRelease = status.latestRelease,
                    latestRelease.version.compare(status.installedApp.version, options: .numeric) == .orderedDescending {
-                    return .failed(status, """
-                    Latest release \(latestRelease.version) is published, but Homebrew has not picked it up yet.
-                    Try again in a minute.
-                    """)
+                    return .stillRollingOut(status)
                 }
                 return .alreadyUpToDate(status)
             }
@@ -1357,6 +1464,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         valuesString.draw(at: NSPoint(x: (width - valuesString.size().width) / 2, y: yOffset))
 
+        if availableUpdateVersion != nil {
+            brandClaudeColor.setFill()
+            NSBezierPath(ovalIn: NSRect(x: width - 5, y: height - 5, width: 4, height: 4)).fill()
+        }
+
         image.unlockFocus()
         image.isTemplate = false
         return (image, width)
@@ -1471,6 +1583,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         valuesString.draw(at: NSPoint(x: (width - valuesString.size().width) / 2, y: yOffset))
+
+        if availableUpdateVersion != nil {
+            brandClaudeColor.setFill()
+            NSBezierPath(ovalIn: NSRect(x: width - 5, y: height - 5, width: 4, height: 4)).fill()
+        }
 
         image.unlockFocus()
         image.isTemplate = false

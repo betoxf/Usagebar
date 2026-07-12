@@ -511,11 +511,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let planInfo = cursor.planName != "unknown" ? cursor.planName.capitalized : ""
                 appendSimpleProviderSection(
                     title: "Cursor",
-                    titleColor: NSColor(red: 0.0, green: 0.75, blue: 0.65, alpha: 1.0),
+                    titleColor: NSColor.labelColor,
                     subtitle: planInfo,
                     usedPercent: cursor.usedPercent,
                     resetText: cursor.timeUntilReset,
-                    error: viewModel.cursorError
+                    error: viewModel.cursorError,
+                    accentColor: brandCursorColor
                 )
             }
 
@@ -1526,7 +1527,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let totalWidth = glyphSize + labelString.size().width
             let startX = (width - totalWidth) / 2
 
-            drawGlyph(glyph, in: NSRect(x: startX, y: 13, width: glyphSize, height: glyphSize), color: brandColor)
+            // Cursor's mark is monochrome (black cube, gray faces) — adapt to
+            // the menu bar theme instead of using the accent color.
+            let glyphColor: NSColor = switch glyph {
+            case .cursor: isDarkMode ? NSColor.white : NSColor(white: 0.1, alpha: 1.0)
+            case .zai: brandColor
+            }
+            drawGlyph(glyph, in: NSRect(x: startX, y: 13, width: glyphSize, height: glyphSize), color: glyphColor)
             labelString.draw(at: NSPoint(x: startX + glyphSize, y: 12))
             yOffset = 0
         } else {
@@ -1868,13 +1875,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Header + single "used% • reset" row shared by Cursor and Zai.
+    /// `accentColor` (defaults to the title color) highlights high usage.
     private func appendSimpleProviderSection(
         title: String,
         titleColor: NSColor,
         subtitle: String,
         usedPercent: Int,
         resetText: String,
-        error: String?
+        error: String?,
+        accentColor: NSColor? = nil
     ) {
         let header = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         header.isEnabled = false
@@ -1894,7 +1903,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let valueColor = usageHighlightColor(
             percentage: usedPercent,
             highThreshold: 90,
-            accentColor: titleColor,
+            accentColor: accentColor ?? titleColor,
             fallback: NSColor.labelColor
         )
         let row = NSMenuItem(title: "  \(usedPercent)%  \u{2022}  \(resetText)", action: nil, keyEquivalent: "")

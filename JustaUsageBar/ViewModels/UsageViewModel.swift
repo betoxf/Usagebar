@@ -161,6 +161,9 @@ final class UsageViewModel: ObservableObject {
             usageData = data
             claudeAuthSource = ClaudeAPIService.shared.lastAuthSource
             claudeError = nil
+        } catch APIError.unauthorized {
+            claudeError = "Signed out — run `claude` in Terminal to log in"
+            print("Claude Error: unauthorized")
         } catch let apiError as APIError {
             claudeError = apiError.errorDescription
             print("Claude Error: \(apiError.errorDescription ?? "Unknown")")

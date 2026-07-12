@@ -76,6 +76,21 @@ codex login
 
 Claude also supports an in-app browser-session fallback from **Setup Usage Tracking**.
 
+### If Claude shows "Session expired" or authentication fails
+
+Re-authenticate from the terminal — this is the reliable fix:
+
+1. Open Terminal and run `claude` (or `claude login`).
+2. Complete the login it prompts for.
+3. Click **Refresh** in Usagebar. Usage appears within a few seconds.
+
+Usagebar reads the credentials Claude Code writes locally and never rotates
+them itself, so a fresh terminal login is always picked up automatically.
+
+Cursor is discovered from the Cursor.app login (no extra setup). z.ai appears
+when a `Z_AI_API_KEY` is configured (environment variable or
+`~/.zai/config.json` with `{"apiKey": "..."}`).
+
 ## Menu-bar controls
 
 | Control | Behavior |

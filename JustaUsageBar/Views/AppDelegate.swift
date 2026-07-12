@@ -396,14 +396,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     if let claudeError = viewModel.claudeError {
                         menu.addItem(makeStatusMessageItem(claudeError, color: .systemOrange))
                         if shouldPromptClaudeAuthentication {
-                            let authItem = NSMenuItem(title: "Authenticate Claude…", action: #selector(authenticateClaude), keyEquivalent: "")
+                            let authItem = NSMenuItem(title: "How to authenticate Claude", action: #selector(authenticateClaude), keyEquivalent: "")
                             authItem.target = self
                             menu.addItem(authItem)
                         }
                     }
                 } else {
                     menu.addItem(makeStatusMessageItem("Not authenticated", color: .secondaryLabelColor))
-                    let authItem = NSMenuItem(title: "Authenticate Claude…", action: #selector(authenticateClaude), keyEquivalent: "")
+                    let authItem = NSMenuItem(title: "How to authenticate Claude", action: #selector(authenticateClaude), keyEquivalent: "")
                     authItem.target = self
                     menu.addItem(authItem)
                 }
@@ -767,7 +767,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func authenticateClaude() {
-        showCredentialsWindow()
+        let alert = NSAlert()
+        alert.messageText = "Authenticate Claude"
+        alert.informativeText = """
+        Open Terminal, run `claude`, and log in when prompted.
+        Then click Refresh in Usagebar and your usage will appear.
+
+        This also fixes "Session expired": re-logging in from the \
+        terminal renews the credentials Usagebar reads.
+        """
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Manual Setup…")
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertSecondButtonReturn {
+            showCredentialsWindow()
+        }
     }
 
     @objc private func authenticateCodex() {
@@ -1547,23 +1562,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return (image, width)
     }
 
-    /// Draws a small brand glyph. Cursor = hexagonal cube outline; Zai = bold Z.
+    /// Draws a small brand glyph. Cursor = isometric cube; Zai = bold Z.
     private func drawGlyph(_ glyph: ProviderGlyph, in rect: NSRect, color: NSColor) {
         color.set()
         switch glyph {
         case .cursor:
-            // A hexagon silhouette approximating Cursor's cube mark.
-            let path = NSBezierPath()
+            // Isometric cube like Cursor's logo: a pointy-top hexagon split
+            // into three rhombus faces with distinct shading.
             let cx = rect.midX, cy = rect.midY
             let r = rect.width / 2
-            for i in 0..<6 {
-                let angle = CGFloat.pi / 6 + CGFloat(i) * CGFloat.pi / 3
-                let point = NSPoint(x: cx + r * cos(angle), y: cy + r * sin(angle))
-                if i == 0 { path.move(to: point) } else { path.line(to: point) }
+            func vertex(_ degrees: CGFloat) -> NSPoint {
+                let rad = degrees * .pi / 180
+                return NSPoint(x: cx + r * cos(rad), y: cy + r * sin(rad))
             }
-            path.close()
-            path.lineWidth = 1
-            path.stroke()
+            let center = NSPoint(x: cx, y: cy)
+            let top = vertex(90), upLeft = vertex(150), downLeft = vertex(210)
+            let bottom = vertex(270), downRight = vertex(330), upRight = vertex(30)
+
+            func fillFace(_ points: [NSPoint], alpha: CGFloat) {
+                let path = NSBezierPath()
+                path.move(to: points[0])
+                for point in points.dropFirst() { path.line(to: point) }
+                path.close()
+                color.withAlphaComponent(alpha).setFill()
+                path.fill()
+            }
+            fillFace([upLeft, top, upRight, center], alpha: 1.0)          // top
+            fillFace([upLeft, center, bottom, downLeft], alpha: 0.62)     // left
+            fillFace([center, upRight, downRight, bottom], alpha: 0.30)   // right
         case .zai:
             let zAttrs: [NSAttributedString.Key: Any] = [
                 .font: NSFont.systemFont(ofSize: 8, weight: .bold),

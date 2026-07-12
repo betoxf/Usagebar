@@ -6,9 +6,14 @@
 import SwiftUI
 import AppKit
 
-enum DisplayProvider: String {
+enum DisplayProvider: String, CaseIterable {
     case claude
     case codex
+    case cursor
+    case zai
+
+    /// Fixed left-to-right order used for cycling and menu layout.
+    static let displayOrder: [DisplayProvider] = [.claude, .codex, .cursor, .zai]
 }
 
 @MainActor
@@ -120,6 +125,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if bundleId.hasPrefix("com.openai.") || name == "chatgpt" || name == "codex" {
             return .codex
+        }
+        // Cursor ships under a ToDesktop bundle id; match it and the app name.
+        if bundleId == "com.todesktop.230313mzl4w4u92" || name == "cursor" {
+            return .cursor
         }
         return nil
     }
@@ -272,8 +281,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let hasClaude = viewModel.hasClaudeCredentials
         let hasCodex = viewModel.hasCodexCredentials
+        let hasCursor = viewModel.hasCursorCredentials
+        let hasZai = viewModel.hasZaiCredentials
 
-        if !hasClaude && !hasCodex {
+        if !hasClaude && !hasCodex && !hasCursor && !hasZai {
             let setupItem = NSMenuItem(title: "Setup Usage Tracking", action: #selector(showCredentialsWindow), keyEquivalent: "")
             setupItem.target = self
             menu.addItem(setupItem)
@@ -491,6 +502,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
 
+            // Cursor usage section
+            if hasCursor && viewModel.showCursor {
+                if viewModel.showClaude || viewModel.showCodex {
+                    menu.addItem(NSMenuItem.separator())
+                }
+                let cursor = viewModel.cursorUsageData
+                let planInfo = cursor.planName != "unknown" ? cursor.planName.capitalized : ""
+                appendSimpleProviderSection(
+                    title: "Cursor",
+                    titleColor: NSColor(red: 0.0, green: 0.75, blue: 0.65, alpha: 1.0),
+                    subtitle: planInfo,
+                    usedPercent: cursor.usedPercent,
+                    resetText: cursor.timeUntilReset,
+                    error: viewModel.cursorError
+                )
+            }
+
+            // Zai usage section
+            if hasZai && viewModel.showZai {
+                if viewModel.showClaude || viewModel.showCodex || (hasCursor && viewModel.showCursor) {
+                    menu.addItem(NSMenuItem.separator())
+                }
+                let zai = viewModel.zaiUsageData
+                let planInfo = zai.planName != "unknown" ? zai.planName.capitalized : ""
+                appendSimpleProviderSection(
+                    title: "z.ai",
+                    titleColor: NSColor(red: 0.91, green: 0.35, blue: 0.42, alpha: 1.0),
+                    subtitle: planInfo,
+                    usedPercent: zai.usedPercent,
+                    resetText: zai.timeUntilReset,
+                    error: viewModel.zaiError
+                )
+            }
+
             menu.addItem(NSMenuItem.separator())
 
             // Refresh
@@ -517,7 +562,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             displayMenu.addItem(onlyWeeklyItem)
 
             // Provider toggles
-            if hasClaude || hasCodex {
+            let authedProviderCount = [hasClaude, hasCodex, hasCursor, hasZai].filter { $0 }.count
+            if authedProviderCount > 0 {
                 displayMenu.addItem(NSMenuItem.separator())
 
                 if hasClaude {
@@ -534,14 +580,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     displayMenu.addItem(codexToggle)
                 }
 
-                // Animation interval submenu
-                if hasClaude && hasCodex && viewModel.showClaude && viewModel.showCodex {
+                if hasCursor {
+                    let cursorToggle = NSMenuItem(title: "Show Cursor", action: #selector(toggleShowCursor), keyEquivalent: "")
+                    cursorToggle.target = self
+                    cursorToggle.state = viewModel.showCursor ? .on : .off
+                    displayMenu.addItem(cursorToggle)
+                }
+
+                if hasZai {
+                    let zaiToggle = NSMenuItem(title: "Show z.ai", action: #selector(toggleShowZai), keyEquivalent: "")
+                    zaiToggle.target = self
+                    zaiToggle.state = viewModel.showZai ? .on : .off
+                    displayMenu.addItem(zaiToggle)
+                }
+
+                // Follow-active-app + switch-interval apply once 2+ providers show.
+                if authedProviderCount >= 2 {
                     displayMenu.addItem(NSMenuItem.separator())
 
                     let followItem = NSMenuItem(title: "Follow Active App", action: #selector(toggleFollowActiveApp), keyEquivalent: "")
                     followItem.target = self
                     followItem.state = viewModel.followActiveApp ? .on : .off
-                    followItem.toolTip = "Show Claude usage when a Claude app is in front, Codex usage when ChatGPT or Codex is in front"
+                    followItem.toolTip = "Show a provider's usage when its app (Claude, ChatGPT/Codex, or Cursor) is in front"
                     displayMenu.addItem(followItem)
 
                     let intervalMenu = NSMenu()
@@ -653,14 +713,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        // Left click toggles provider if both are shown
+        // Left click cycles to the next provider when more than one is shown
         if event?.type == .leftMouseUp {
-            let hasBoth = viewModel.hasClaudeCredentials && viewModel.hasCodexCredentials &&
-                          viewModel.showClaude && viewModel.showCodex
-
-            if hasBoth {
+            if displayableProviders().count > 1, let next = providerAfter(currentProvider) {
                 // Switch provider immediately (manual mode or auto mode)
-                setCurrentProvider((currentProvider == .claude) ? .codex : .claude)
+                setCurrentProvider(next)
                 updateStatusImage()
             } else {
                 // If only one provider, show menu
@@ -754,20 +811,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         rebuildMenu()
     }
 
+    /// Re-enables the just-toggled provider if hiding it would leave no
+    /// authenticated provider visible (the bar must never go blank).
+    private func ensureAProviderRemainsShown(fallback keyPath: ReferenceWritableKeyPath<UsageViewModel, Bool>) {
+        let anyShown =
+            (viewModel.showClaude && viewModel.hasClaudeCredentials) ||
+            (viewModel.showCodex && viewModel.hasCodexCredentials) ||
+            (viewModel.showCursor && viewModel.hasCursorCredentials) ||
+            (viewModel.showZai && viewModel.hasZaiCredentials)
+        if !anyShown {
+            viewModel[keyPath: keyPath] = true
+        }
+    }
+
     @objc private func toggleShowClaude() {
         viewModel.showClaude.toggle()
-        // Ensure at least one provider is shown
-        if !viewModel.showClaude && !viewModel.showCodex {
-            viewModel.showCodex = true
-        }
+        ensureAProviderRemainsShown(fallback: \.showClaude)
         NotificationCenter.default.post(name: NSNotification.Name("SettingsChanged"), object: nil)
     }
 
     @objc private func toggleShowCodex() {
         viewModel.showCodex.toggle()
-        if !viewModel.showClaude && !viewModel.showCodex {
-            viewModel.showClaude = true
-        }
+        ensureAProviderRemainsShown(fallback: \.showCodex)
+        NotificationCenter.default.post(name: NSNotification.Name("SettingsChanged"), object: nil)
+    }
+
+    @objc private func toggleShowCursor() {
+        viewModel.showCursor.toggle()
+        ensureAProviderRemainsShown(fallback: \.showCursor)
+        NotificationCenter.default.post(name: NSNotification.Name("SettingsChanged"), object: nil)
+    }
+
+    @objc private func toggleShowZai() {
+        viewModel.showZai.toggle()
+        ensureAProviderRemainsShown(fallback: \.showZai)
         NotificationCenter.default.post(name: NSNotification.Name("SettingsChanged"), object: nil)
     }
 
@@ -1229,6 +1306,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return viewModel.hasClaudeCredentials
         case .codex:
             return viewModel.hasCodexCredentials
+        case .cursor:
+            return viewModel.hasCursorCredentials
+        case .zai:
+            return viewModel.hasZaiCredentials
         }
     }
 
@@ -1238,16 +1319,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return viewModel.showClaude
         case .codex:
             return viewModel.showCodex
+        case .cursor:
+            return viewModel.showCursor
+        case .zai:
+            return viewModel.showZai
         }
     }
 
+    /// Every provider that is authenticated and toggled on, in display order.
+    private func enabledProvidersWithCredentials() -> [DisplayProvider] {
+        DisplayProvider.displayOrder.filter { hasCredentials(for: $0) && isProviderEnabled($0) }
+    }
+
     private func hasShownProviderWithCredentials(excluding excludedProvider: DisplayProvider) -> Bool {
-        for provider in [DisplayProvider.claude, .codex] where provider != excludedProvider {
-            if hasCredentials(for: provider) && isProviderEnabled(provider) {
-                return true
-            }
-        }
-        return false
+        enabledProvidersWithCredentials().contains { $0 != excludedProvider }
     }
 
     private func canDisplay(_ provider: DisplayProvider) -> Bool {
@@ -1262,17 +1347,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return !hasShownProviderWithCredentials(excluding: provider)
     }
 
+    /// Providers eligible to display right now, in fixed order.
+    private func displayableProviders() -> [DisplayProvider] {
+        let enabled = enabledProvidersWithCredentials()
+        if !enabled.isEmpty {
+            return enabled
+        }
+        // Nothing is both on and authenticated (e.g. all toggled off) — fall back
+        // to anything authenticated so the bar never goes blank.
+        return DisplayProvider.displayOrder.filter { hasCredentials(for: $0) }
+    }
+
+    /// The provider shown after the current one when cycling (click or timer).
+    private func providerAfter(_ provider: DisplayProvider) -> DisplayProvider? {
+        let providers = displayableProviders()
+        guard !providers.isEmpty else { return nil }
+        guard let index = providers.firstIndex(of: provider) else { return providers.first }
+        return providers[(index + 1) % providers.count]
+    }
+
     private func resolveProvider(preferred provider: DisplayProvider) -> DisplayProvider? {
         if canDisplay(provider) {
             return provider
         }
-
-        let fallback: DisplayProvider = (provider == .claude) ? .codex : .claude
-        if canDisplay(fallback) {
-            return fallback
-        }
-
-        return nil
+        return displayableProviders().first
     }
 
     private func setCurrentProvider(_ provider: DisplayProvider, persistPreference: Bool = true) {
@@ -1315,7 +1413,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         providerSwitchTimer = Timer.scheduledTimer(withTimeInterval: viewModel.animationInterval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                let nextProvider: DisplayProvider = (self.currentProvider == .claude) ? .codex : .claude
+                guard let nextProvider = self.providerAfter(self.currentProvider) else { return }
                 self.setCurrentProvider(nextProvider, persistPreference: false)
                 self.updateStatusImage()
             }
@@ -1360,6 +1458,119 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return createClaudeImage()
         case .codex:
             return createCodexImage()
+        case .cursor:
+            return createSimpleProviderImage(
+                label: "Cursor",
+                brandColor: brandCursorColor,
+                usedPercent: viewModel.cursorUsageData.usedPercent,
+                glyph: .cursor
+            )
+        case .zai:
+            return createSimpleProviderImage(
+                label: "z.ai",
+                brandColor: brandZaiColor,
+                usedPercent: viewModel.zaiUsageData.usedPercent,
+                glyph: .zai
+            )
+        }
+    }
+
+    // MARK: - Cursor / Zai Image (shared single-value renderer)
+
+    private enum ProviderGlyph {
+        case cursor
+        case zai
+    }
+
+    /// Compact status image for the single-percentage providers: brand glyph +
+    /// name on top (when the icon is shown), one big percentage underneath.
+    private func createSimpleProviderImage(
+        label: String,
+        brandColor: NSColor,
+        usedPercent: Int,
+        glyph: ProviderGlyph
+    ) -> (NSImage, CGFloat) {
+        let showIcon = viewModel.showIcon
+        let width: CGFloat = 50
+        let height: CGFloat = showIcon ? 22 : 16
+
+        let image = NSImage(size: NSSize(width: width, height: height))
+        image.lockFocus()
+
+        let isDarkMode = getDarkMode()
+        let textColor = isDarkMode ? NSColor.white : NSColor(white: 0.25, alpha: 1.0)
+
+        var yOffset: CGFloat = 0
+        if showIcon {
+            let glyphSize: CGFloat = 7
+            let labelAttributes: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 7, weight: .semibold),
+                .foregroundColor: textColor
+            ]
+            let labelString = NSAttributedString(string: " \(label)", attributes: labelAttributes)
+            let totalWidth = glyphSize + labelString.size().width
+            let startX = (width - totalWidth) / 2
+
+            drawGlyph(glyph, in: NSRect(x: startX, y: 13, width: glyphSize, height: glyphSize), color: brandColor)
+            labelString.draw(at: NSPoint(x: startX + glyphSize, y: 12))
+            yOffset = 0
+        } else {
+            yOffset = 3
+        }
+
+        let valueColor = usageHighlightColor(
+            percentage: usedPercent,
+            highThreshold: 90,
+            accentColor: brandColor,
+            fallback: textColor
+        )
+        let numberAttributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 10, weight: .regular),
+            .foregroundColor: valueColor
+        ]
+        let percentAttributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 10, weight: .medium),
+            .foregroundColor: valueColor
+        ]
+        let valuesString = NSMutableAttributedString()
+        valuesString.append(NSAttributedString(string: "\(usedPercent)", attributes: numberAttributes))
+        valuesString.append(NSAttributedString(string: "%", attributes: percentAttributes))
+        valuesString.draw(at: NSPoint(x: (width - valuesString.size().width) / 2, y: yOffset))
+
+        if availableUpdateVersion != nil {
+            brandClaudeColor.setFill()
+            NSBezierPath(ovalIn: NSRect(x: width - 5, y: height - 5, width: 4, height: 4)).fill()
+        }
+
+        image.unlockFocus()
+        image.isTemplate = false
+        return (image, width)
+    }
+
+    /// Draws a small brand glyph. Cursor = hexagonal cube outline; Zai = bold Z.
+    private func drawGlyph(_ glyph: ProviderGlyph, in rect: NSRect, color: NSColor) {
+        color.set()
+        switch glyph {
+        case .cursor:
+            // A hexagon silhouette approximating Cursor's cube mark.
+            let path = NSBezierPath()
+            let cx = rect.midX, cy = rect.midY
+            let r = rect.width / 2
+            for i in 0..<6 {
+                let angle = CGFloat.pi / 6 + CGFloat(i) * CGFloat.pi / 3
+                let point = NSPoint(x: cx + r * cos(angle), y: cy + r * sin(angle))
+                if i == 0 { path.move(to: point) } else { path.line(to: point) }
+            }
+            path.close()
+            path.lineWidth = 1
+            path.stroke()
+        case .zai:
+            let zAttrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 8, weight: .bold),
+                .foregroundColor: color
+            ]
+            let z = NSAttributedString(string: "Z", attributes: zAttrs)
+            z.draw(at: NSPoint(x: rect.minX, y: rect.minY - 1))
         }
     }
 
@@ -1604,6 +1815,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSColor(red: 0.14, green: 0.73, blue: 0.94, alpha: 1.0)
     }
 
+    private var brandCursorColor: NSColor {
+        NSColor(red: 0.0, green: 0.75, blue: 0.65, alpha: 1.0)
+    }
+
+    private var brandZaiColor: NSColor {
+        NSColor(red: 0.91, green: 0.35, blue: 0.42, alpha: 1.0)
+    }
+
     private func usageHighlightColor(
         percentage: Int,
         highThreshold: Int,
@@ -1620,6 +1839,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var shouldPromptCodexAuthentication: Bool {
         !viewModel.hasCodexCredentials || viewModel.codexError == APIError.unauthorized.errorDescription
+    }
+
+    /// Header + single "used% • reset" row shared by Cursor and Zai.
+    private func appendSimpleProviderSection(
+        title: String,
+        titleColor: NSColor,
+        subtitle: String,
+        usedPercent: Int,
+        resetText: String,
+        error: String?
+    ) {
+        let header = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        let headerString = NSMutableAttributedString(string: "\(title)  ", attributes: [
+            .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
+            .foregroundColor: titleColor
+        ])
+        if !subtitle.isEmpty {
+            headerString.append(NSAttributedString(string: subtitle, attributes: [
+                .font: NSFont.systemFont(ofSize: 11, weight: .regular),
+                .foregroundColor: NSColor.secondaryLabelColor
+            ]))
+        }
+        header.attributedTitle = headerString
+        menu.addItem(header)
+
+        let valueColor = usageHighlightColor(
+            percentage: usedPercent,
+            highThreshold: 90,
+            accentColor: titleColor,
+            fallback: NSColor.labelColor
+        )
+        let row = NSMenuItem(title: "  \(usedPercent)%  \u{2022}  \(resetText)", action: nil, keyEquivalent: "")
+        row.isEnabled = false
+        let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11, weight: .regular)]
+        let rowString = NSMutableAttributedString(string: "  ", attributes: attrs)
+        rowString.append(NSAttributedString(string: "\(usedPercent)", attributes: [
+            .font: NSFont.systemFont(ofSize: 11, weight: .medium),
+            .foregroundColor: valueColor
+        ]))
+        rowString.append(NSAttributedString(string: "%  \u{2022}  \(resetText)", attributes: attrs))
+        row.attributedTitle = rowString
+        menu.addItem(row)
+
+        if let error {
+            menu.addItem(makeStatusMessageItem(error, color: .systemOrange))
+        }
     }
 
     private func makeStatusMessageItem(_ title: String, color: NSColor) -> NSMenuItem {

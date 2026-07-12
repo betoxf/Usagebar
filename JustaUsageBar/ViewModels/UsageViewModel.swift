@@ -23,6 +23,16 @@ final class UsageViewModel: ObservableObject {
     @Published var codexUsageData: CodexUsageData = .placeholder
     @Published var codexError: String?
 
+    // MARK: - Cursor Published Properties
+
+    @Published var cursorUsageData: CursorUsageData = .placeholder
+    @Published var cursorError: String?
+
+    // MARK: - Zai Published Properties
+
+    @Published var zaiUsageData: ZaiUsageData = .placeholder
+    @Published var zaiError: String?
+
     // MARK: - General
 
     @Published var isLoading: Bool = false
@@ -37,6 +47,8 @@ final class UsageViewModel: ObservableObject {
     @AppStorage("showOnlyWeekly") var showOnlyWeekly: Bool = false
     @AppStorage("showClaude") var showClaude: Bool = true
     @AppStorage("showCodex") var showCodex: Bool = true
+    @AppStorage("showCursor") var showCursor: Bool = true
+    @AppStorage("showZai") var showZai: Bool = true
     @AppStorage("animationInterval") var animationInterval: Double = 8.0
     @AppStorage("followActiveApp") var followActiveApp: Bool = true
     @AppStorage("autoUpdate") var autoUpdate: Bool = true
@@ -110,10 +122,12 @@ final class UsageViewModel: ObservableObject {
         isLoading = true
         error = nil
 
-        // Refresh both providers in parallel
+        // Refresh all providers in parallel
         async let claudeResult: Void = refreshClaude()
         async let codexResult: Void = refreshCodex()
-        _ = await (claudeResult, codexResult)
+        async let cursorResult: Void = refreshCursor()
+        async let zaiResult: Void = refreshZai()
+        _ = await (claudeResult, codexResult, cursorResult, zaiResult)
 
         lastUpdated = Date()
         isLoading = false
@@ -123,6 +137,8 @@ final class UsageViewModel: ObservableObject {
     func rediscoverCredentialsAndRefresh() async {
         ClaudeOAuthService.shared.clearCache()
         CodexAPIService.shared.clearCache()
+        CursorAPIService.shared.clearCache()
+        ZaiAPIService.shared.clearCache()
         detectCredentials()
 
         if hasCredentials {
@@ -173,6 +189,42 @@ final class UsageViewModel: ObservableObject {
         }
     }
 
+    private func refreshCursor() async {
+        guard hasCursorCredentials else {
+            cursorError = nil
+            return
+        }
+
+        do {
+            cursorUsageData = try await CursorAPIService.shared.fetchUsage()
+            cursorError = nil
+        } catch let apiError as APIError {
+            cursorError = apiError.errorDescription
+            print("Cursor Error: \(apiError.errorDescription ?? "Unknown")")
+        } catch {
+            cursorError = error.localizedDescription
+            print("Cursor Error: \(error)")
+        }
+    }
+
+    private func refreshZai() async {
+        guard hasZaiCredentials else {
+            zaiError = nil
+            return
+        }
+
+        do {
+            zaiUsageData = try await ZaiAPIService.shared.fetchUsage()
+            zaiError = nil
+        } catch let apiError as APIError {
+            zaiError = apiError.errorDescription
+            print("Zai Error: \(apiError.errorDescription ?? "Unknown")")
+        } catch {
+            zaiError = error.localizedDescription
+            print("Zai Error: \(error)")
+        }
+    }
+
     func startAutoRefresh() {
         stopAutoRefresh()
 
@@ -208,7 +260,7 @@ final class UsageViewModel: ObservableObject {
     // MARK: - Credentials
 
     var hasCredentials: Bool {
-        hasClaudeCredentials || hasCodexCredentials
+        hasClaudeCredentials || hasCodexCredentials || hasCursorCredentials || hasZaiCredentials
     }
 
     var hasClaudeCredentials: Bool {
@@ -219,9 +271,27 @@ final class UsageViewModel: ObservableObject {
         CodexAPIService.shared.hasCredentials
     }
 
-    /// Whether both providers are active and should animate
+    var hasCursorCredentials: Bool {
+        CursorAPIService.shared.hasCredentials
+    }
+
+    var hasZaiCredentials: Bool {
+        ZaiAPIService.shared.hasCredentials
+    }
+
+    /// Number of authenticated providers the user has toggled on.
+    private var activeShownProviderCount: Int {
+        var count = 0
+        if showClaude && hasClaudeCredentials { count += 1 }
+        if showCodex && hasCodexCredentials { count += 1 }
+        if showCursor && hasCursorCredentials { count += 1 }
+        if showZai && hasZaiCredentials { count += 1 }
+        return count
+    }
+
+    /// Whether two or more providers are active and should rotate.
     var shouldAnimateProviders: Bool {
-        showClaude && showCodex && hasClaudeCredentials && hasCodexCredentials && animationInterval > 0
+        activeShownProviderCount >= 2 && animationInterval > 0
     }
 
     func saveCredentials(sessionKey: String, organizationId: String) {

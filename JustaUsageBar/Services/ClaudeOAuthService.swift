@@ -34,41 +34,72 @@ final class ClaudeOAuthService {
 
     // MARK: - Credential Discovery
 
-    func loadCredentials() -> OAuthCredentials? {
-        if let lastCheck = lastCredentialCheck,
-           Date().timeIntervalSince(lastCheck) < cacheTTL {
-            return cachedCredentials
+    func loadCredentials(forceReload: Bool = false) -> OAuthCredentials? {
+        // Serve the short-lived cache only while it holds a still-valid token.
+        // A cached-but-expired token must trigger a re-read, because Claude Code
+        // may have rotated in a fresh one since we last looked.
+        if !forceReload,
+           let lastCheck = lastCredentialCheck,
+           Date().timeIntervalSince(lastCheck) < cacheTTL,
+           let cached = cachedCredentials,
+           !isExpired(cached) {
+            return cached
         }
 
-        // 1. Prefer the app's own encrypted mirror so updates don't trigger repeated
-        // macOS password prompts for the same Claude OAuth credentials.
-        if let creds = readPersistedCredentials() {
-            cache(credentials: creds)
-            return creds
+        // Gather every source and use the FRESHEST (latest expiry), rather than
+        // first-wins. Claude Code owns and rotates these tokens; clinging to our
+        // own stale mirror is exactly what left the app stuck "signed out" while
+        // a valid token sat in the keychain. Reading all sources and picking the
+        // newest means we automatically ride along with Claude Code's refreshes.
+        var candidates: [OAuthCredentials] = []
+        if let c = readPersistedCredentials() { candidates.append(c) }
+        if let c = readCredentialsFile() { candidates.append(c) }
+        if let c = readFromKeychainUsingSecurityCLI() { candidates.append(c) }
+        if let c = readFromKeychain() { candidates.append(c) }
+
+        guard let best = freshest(of: candidates) else {
+            cachedCredentials = nil
+            lastCredentialCheck = Date()
+            return nil
         }
 
-        // 2. Try credentials file (~/.claude/.credentials.json) when available.
-        if let creds = readCredentialsFile() {
-            cache(credentials: creds, persist: true)
-            return creds
+        // Mirror the freshest so later loads stay cheap and prompt-free.
+        cache(credentials: best, persist: true)
+        return best
+    }
+
+    /// Latest-expiry wins; a dated token beats one with unknown expiry.
+    private func freshest(of creds: [OAuthCredentials]) -> OAuthCredentials? {
+        creds.max { ($0.expiresAt ?? .distantPast) < ($1.expiresAt ?? .distantPast) }
+    }
+
+    private func isExpired(_ creds: OAuthCredentials, skew: TimeInterval = 60) -> Bool {
+        guard let expiresAt = creds.expiresAt else { return false }
+        return expiresAt <= Date().addingTimeInterval(skew)
+    }
+
+    /// Parses the `{ "claudeAiOauth": { ... } }` shape shared by the credentials
+    /// file, the keychain, and the `security` CLI output.
+    private func parseCredentialsJSON(_ data: Data) -> OAuthCredentials? {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let oauth = json["claudeAiOauth"] as? [String: Any],
+              let accessToken = oauth["accessToken"] as? String else {
+            return nil
         }
 
-        // 3. Prefer the stable Apple-signed `security` tool before a direct GUI
-        // Keychain read so app updates don't look like a new requester to Keychain.
-        if let creds = readFromKeychainUsingSecurityCLI() {
-            cache(credentials: creds, persist: true)
-            return creds
+        let refreshToken = oauth["refreshToken"] as? String
+        var expiresAt: Date?
+        if let expiresMs = oauth["expiresAt"] as? Double {
+            expiresAt = Date(timeIntervalSince1970: expiresMs / 1000.0)
         }
+        let scopes = oauth["scopes"] as? [String] ?? []
 
-        // 4. Fall back to a direct Keychain read only when the safer paths miss.
-        if let creds = readFromKeychain() {
-            cache(credentials: creds, persist: true)
-            return creds
-        }
-
-        cachedCredentials = nil
-        lastCredentialCheck = Date()
-        return nil
+        return OAuthCredentials(
+            accessToken: accessToken,
+            refreshToken: refreshToken,
+            expiresAt: expiresAt,
+            scopes: scopes
+        )
     }
 
     var hasCredentials: Bool {
@@ -92,62 +123,57 @@ final class ClaudeOAuthService {
         let credPath = homeDir.appendingPathComponent(".claude/.credentials.json")
 
         guard FileManager.default.fileExists(atPath: credPath.path),
-              let data = try? Data(contentsOf: credPath),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let oauth = json["claudeAiOauth"] as? [String: Any],
-              let accessToken = oauth["accessToken"] as? String else {
+              let data = try? Data(contentsOf: credPath) else {
             return nil
         }
-
-        let refreshToken = oauth["refreshToken"] as? String
-        var expiresAt: Date?
-        if let expiresMs = oauth["expiresAt"] as? Double {
-            expiresAt = Date(timeIntervalSince1970: expiresMs / 1000.0)
-        }
-        let scopes = oauth["scopes"] as? [String] ?? []
-
-        return OAuthCredentials(
-            accessToken: accessToken,
-            refreshToken: refreshToken,
-            expiresAt: expiresAt,
-            scopes: scopes
-        )
+        return parseCredentialsJSON(data)
     }
 
     // MARK: - Read from Keychain (Claude CLI)
 
     private func readFromKeychain() -> OAuthCredentials? {
-        let query: [String: Any] = [
+        // Claude Code may store several "Claude Code-credentials*" items (e.g. a
+        // suffixed duplicate after re-login). Enumerate them all, newest first,
+        // and return the freshest usable one — a plain kSecMatchLimitOne query
+        // returns an arbitrary item and was often the stale one.
+        let probe: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: claudeKeychainService,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
+            kSecMatchLimit as String: kSecMatchLimitAll,
+            kSecReturnAttributes as String: true,
+            kSecReturnPersistentRef as String: true
         ]
 
         var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-
-        guard status == errSecSuccess,
-              let data = result as? Data,
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let oauth = json["claudeAiOauth"] as? [String: Any],
-              let accessToken = oauth["accessToken"] as? String else {
+        guard SecItemCopyMatching(probe as CFDictionary, &result) == errSecSuccess,
+              let items = result as? [[String: Any]] else {
             return nil
         }
 
-        let refreshToken = oauth["refreshToken"] as? String
-        var expiresAt: Date?
-        if let expiresMs = oauth["expiresAt"] as? Double {
-            expiresAt = Date(timeIntervalSince1970: expiresMs / 1000.0)
-        }
-        let scopes = oauth["scopes"] as? [String] ?? []
+        let claudeItems = items
+            .filter { ($0[kSecAttrService as String] as? String)?.hasPrefix(claudeKeychainService) == true }
+            .sorted {
+                let a = $0[kSecAttrModificationDate as String] as? Date ?? .distantPast
+                let b = $1[kSecAttrModificationDate as String] as? Date ?? .distantPast
+                return a > b
+            }
 
-        return OAuthCredentials(
-            accessToken: accessToken,
-            refreshToken: refreshToken,
-            expiresAt: expiresAt,
-            scopes: scopes
-        )
+        var candidates: [OAuthCredentials] = []
+        for item in claudeItems {
+            guard let ref = item[kSecValuePersistentRef as String] else { continue }
+            let dataQuery: [String: Any] = [
+                kSecValuePersistentRef as String: ref,
+                kSecReturnData as String: true
+            ]
+            var dataResult: AnyObject?
+            guard SecItemCopyMatching(dataQuery as CFDictionary, &dataResult) == errSecSuccess,
+                  let data = dataResult as? Data,
+                  let creds = parseCredentialsJSON(data) else {
+                continue
+            }
+            candidates.append(creds)
+        }
+
+        return freshest(of: candidates)
     }
 
     private func readFromKeychainUsingSecurityCLI() -> OAuthCredentials? {
@@ -199,25 +225,7 @@ final class ClaudeOAuthService {
             return nil
         }
 
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let oauth = json["claudeAiOauth"] as? [String: Any],
-              let accessToken = oauth["accessToken"] as? String else {
-            return nil
-        }
-
-        let refreshToken = oauth["refreshToken"] as? String
-        var expiresAt: Date?
-        if let expiresMs = oauth["expiresAt"] as? Double {
-            expiresAt = Date(timeIntervalSince1970: expiresMs / 1000.0)
-        }
-        let scopes = oauth["scopes"] as? [String] ?? []
-
-        return OAuthCredentials(
-            accessToken: accessToken,
-            refreshToken: refreshToken,
-            expiresAt: expiresAt,
-            scopes: scopes
-        )
+        return parseCredentialsJSON(data)
     }
 
     // MARK: - Fetch Usage via OAuth
@@ -232,8 +240,14 @@ final class ClaudeOAuthService {
         }
 
         // Refresh slightly before expiry to avoid a stale-token race in the menu refresh loop.
-        if let expiresAt = creds.expiresAt, expiresAt <= Date().addingTimeInterval(60) {
-            if let refreshToken = creds.refreshToken {
+        if isExpired(creds) {
+            // Claude Code proactively refreshes its own token. Before we rotate
+            // the refresh token ourselves (which would invalidate Claude Code's
+            // copy and vice-versa), force-reload every source in case Claude Code
+            // already has a newer token waiting.
+            if let reloaded = loadCredentials(forceReload: true), !isExpired(reloaded) {
+                creds = reloaded
+            } else if let refreshToken = creds.refreshToken {
                 do {
                     creds = try await refreshAccessToken(refreshToken: refreshToken)
                     cache(credentials: creds, persist: true)
@@ -431,9 +445,40 @@ final class ClaudeOAuthService {
             }
         }
 
-        // Fable 5 weekly window: reported as `seven_day_overage_included`
-        // (labeled "Fable 5 limit" in Claude Code). Fall back to any
-        // fable/mythos-named window in case the key evolves.
+        parseFableUsage(from: json, into: &usageData)
+
+        return usageData
+    }
+
+    /// Fable weekly usage arrives in two shapes across API versions:
+    ///  1. Newer: a `limits` array of model-scoped weekly entries, each with
+    ///     `scope.model.display_name` ("Fable") plus `percent`/`resets_at`.
+    ///  2. Older: a top-level `seven_day_overage_included` window (labeled
+    ///     "Fable 5 limit" in Claude Code), or any fable/mythos-named window.
+    private func parseFableUsage(from json: [String: Any], into usageData: inout UsageData) {
+        // Shape 1: model-scoped weekly limits.
+        if let limits = json["limits"] as? [[String: Any]] {
+            for entry in limits {
+                let scope = entry["scope"] as? [String: Any]
+                let model = scope?["model"] as? [String: Any]
+                let name = (model?["display_name"] as? String
+                    ?? model?["id"] as? String
+                    ?? "").lowercased()
+                guard name.contains("fable") || name.contains("mythos") else { continue }
+
+                if let percent = entry["percent"] as? Double {
+                    usageData.fableUsed = Int(percent)
+                } else if let percent = entry["percent"] as? Int {
+                    usageData.fableUsed = percent
+                }
+                if let resetsAt = entry["resets_at"] as? String {
+                    usageData.fableResetAt = parseDate(resetsAt)
+                }
+                if usageData.fableUsed != nil { return }
+            }
+        }
+
+        // Shape 2: dedicated top-level window.
         var fableWindow = json["seven_day_overage_included"] as? [String: Any]
         if fableWindow == nil {
             fableWindow = json.first { key, value in
@@ -447,12 +492,6 @@ final class ClaudeOAuthService {
                 usageData.fableResetAt = parseDate(resetsAt)
             }
         }
-
-        #if DEBUG
-        FileHandle.standardError.write(Data("Claude usage windows: \(json.keys.sorted())\n".utf8))
-        #endif
-
-        return usageData
     }
 
     private func parseDate(_ string: String) -> Date? {

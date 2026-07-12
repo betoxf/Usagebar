@@ -717,9 +717,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Left click cycles to the next provider when more than one is shown
         if event?.type == .leftMouseUp {
             if displayableProviders().count > 1, let next = providerAfter(currentProvider) {
-                // Switch provider immediately (manual mode or auto mode)
+                // A manual click always wins, even while focus-follow has the
+                // bar locked to the frontmost app's provider. Suspend the lock
+                // for now; the next app switch (including switching back to
+                // Claude/Cursor/etc.) re-applies focus-follow.
+                focusProvider = nil
                 setCurrentProvider(next)
-                updateStatusImage()
+                restartProviderAnimation()
             } else {
                 // If only one provider, show menu
                 statusItem.menu = menu

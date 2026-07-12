@@ -91,6 +91,17 @@ Cursor is discovered from the Cursor.app login (no extra setup). z.ai appears
 when a `Z_AI_API_KEY` is configured (environment variable or
 `~/.zai/config.json` with `{"apiKey": "..."}`).
 
+### Tuck away app icons
+
+Since Usagebar already shows your providers' usage, you can hide their own
+menu-bar icons: enable **Tuck Away App Icons** in the menu, then hold ⌘ and
+drag the icons you want hidden (Claude, ChatGPT, Cursor, …) to the left of
+the small `‹` divider that appears. ⌥-click the Usagebar icon — or use
+**Show/Hide Tucked Icons** in the menu — to reveal them temporarily. This
+uses the same zero-overhead divider trick as Dozer/Hidden Bar; macOS has no
+API for hiding another app's icon directly, so the one-time ⌘-drag is how
+you choose what gets tucked.
+
 ## Menu-bar controls
 
 | Control | Behavior |

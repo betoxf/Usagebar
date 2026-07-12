@@ -46,16 +46,26 @@ final class ClaudeOAuthService {
             return cached
         }
 
-        // Gather every source and use the FRESHEST (latest expiry), rather than
-        // first-wins. Claude Code owns and rotates these tokens; clinging to our
-        // own stale mirror is exactly what left the app stuck "signed out" while
-        // a valid token sat in the keychain. Reading all sources and picking the
-        // newest means we automatically ride along with Claude Code's refreshes.
+        // Use the FRESHEST source (latest expiry), rather than first-wins.
+        // Claude Code owns and rotates these tokens; clinging to our own stale
+        // mirror is exactly what left the app stuck "signed out" while a valid
+        // token sat in the keychain.
+        //
+        // Prompt-free sources first: if the mirror or credentials file already
+        // holds an unexpired token, use it WITHOUT touching the keychain — every
+        // keychain secret read can raise a password dialog.
         var candidates: [OAuthCredentials] = []
         if let c = readPersistedCredentials() { candidates.append(c) }
         if let c = readCredentialsFile() { candidates.append(c) }
-        if let c = readFromKeychainUsingSecurityCLI() { candidates.append(c) }
-        if let c = readFromKeychain() { candidates.append(c) }
+
+        if let best = freshest(of: candidates), !isExpired(best) {
+            cache(credentials: best, persist: true)
+            return best
+        }
+
+        // Only now consult the keychain, and read exactly ONE item's secret
+        // (the newest) so the user sees at most a single permission prompt.
+        if let c = readFreshestFromKeychain() { candidates.append(c) }
 
         guard let best = freshest(of: candidates) else {
             cachedCredentials = nil
@@ -131,11 +141,12 @@ final class ClaudeOAuthService {
 
     // MARK: - Read from Keychain (Claude CLI)
 
-    private func readFromKeychain() -> OAuthCredentials? {
+    private func readFreshestFromKeychain() -> OAuthCredentials? {
         // Claude Code may store several "Claude Code-credentials*" items (e.g. a
-        // suffixed duplicate after re-login). Enumerate them all, newest first,
-        // and return the freshest usable one — a plain kSecMatchLimitOne query
-        // returns an arbitrary item and was often the stale one.
+        // suffixed duplicate after re-login). Reading a secret can raise a
+        // password prompt, so probe ATTRIBUTES first (never prompts), pick the
+        // single newest item by modification date — Claude Code rewrites its
+        // item on every refresh — and fetch only that one secret.
         let probe: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecMatchLimit as String: kSecMatchLimitAll,
@@ -157,26 +168,30 @@ final class ClaudeOAuthService {
                 return a > b
             }
 
-        var candidates: [OAuthCredentials] = []
-        for item in claudeItems {
-            guard let ref = item[kSecValuePersistentRef as String] else { continue }
-            let dataQuery: [String: Any] = [
-                kSecValuePersistentRef as String: ref,
-                kSecReturnData as String: true
-            ]
-            var dataResult: AnyObject?
-            guard SecItemCopyMatching(dataQuery as CFDictionary, &dataResult) == errSecSuccess,
-                  let data = dataResult as? Data,
-                  let creds = parseCredentialsJSON(data) else {
-                continue
-            }
-            candidates.append(creds)
+        guard let newest = claudeItems.first else { return nil }
+
+        // Prefer the Apple-signed `security` tool: an "Always Allow" granted to
+        // it survives app updates, unlike one granted to Usagebar's own binary.
+        if let service = newest[kSecAttrService as String] as? String,
+           let creds = readFromKeychainUsingSecurityCLI(service: service) {
+            return creds
         }
 
-        return freshest(of: candidates)
+        // Fall back to a direct read of that same single item.
+        guard let ref = newest[kSecValuePersistentRef as String] else { return nil }
+        let dataQuery: [String: Any] = [
+            kSecValuePersistentRef as String: ref,
+            kSecReturnData as String: true
+        ]
+        var dataResult: AnyObject?
+        guard SecItemCopyMatching(dataQuery as CFDictionary, &dataResult) == errSecSuccess,
+              let data = dataResult as? Data else {
+            return nil
+        }
+        return parseCredentialsJSON(data)
     }
 
-    private func readFromKeychainUsingSecurityCLI() -> OAuthCredentials? {
+    private func readFromKeychainUsingSecurityCLI(service: String) -> OAuthCredentials? {
         guard FileManager.default.isExecutableFile(atPath: securityBinaryPath) else {
             return nil
         }
@@ -186,7 +201,7 @@ final class ClaudeOAuthService {
         process.arguments = [
             "find-generic-password",
             "-s",
-            claudeKeychainService,
+            service,
             "-w",
         ]
 

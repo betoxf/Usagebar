@@ -38,12 +38,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// no matching app is active.
     private var focusProvider: DisplayProvider?
 
-    // Icon-tucking state: a separator status item; everything the user drags
-    // to its LEFT gets pushed off-screen while collapsed (Dozer-style).
-    private var tuckSeparatorItem: NSStatusItem?
-    private static let tuckExpandedLength: CGFloat = 10
-    private static let tuckCollapsedLength: CGFloat = 10000
-
     // Update availability state
     private var availableUpdateVersion: String?
     private var lastReleaseCheckAt: Date?
@@ -56,7 +50,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupMenu()
         observeChanges()
         recordInstalledAppVersionIfNeeded()
-        updateTuckSeparator()
 
         NSApp.setActivationPolicy(.accessory)
 
@@ -224,58 +217,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             button.target = self
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
-    }
-
-    // MARK: - Icon Tucking (hide other apps' menu bar icons)
-
-    /// Creates or removes the divider item and applies the collapsed state.
-    /// macOS offers no API to hide another app's status item directly, so we
-    /// use the Dozer/Hidden Bar approach: icons the user ⌘-drags to the LEFT
-    /// of our divider get pushed off-screen when the divider inflates.
-    private func updateTuckSeparator() {
-        guard viewModel.hideOtherIcons else {
-            if let item = tuckSeparatorItem {
-                NSStatusBar.system.removeStatusItem(item)
-                tuckSeparatorItem = nil
-            }
-            return
-        }
-
-        if tuckSeparatorItem == nil {
-            let item = NSStatusBar.system.statusItem(withLength: Self.tuckExpandedLength)
-            item.autosaveName = "UsagebarTuckSeparator"
-            if let button = item.button {
-                button.image = tuckSeparatorImage()
-                button.imagePosition = .imageRight
-                button.toolTip = "Usagebar divider — ⌘-drag icons to its left to tuck them; ⌥-click the Usagebar icon to show or hide them"
-            }
-            tuckSeparatorItem = item
-        }
-
-        tuckSeparatorItem?.length = viewModel.otherIconsCollapsed
-            ? Self.tuckCollapsedLength
-            : Self.tuckExpandedLength
-    }
-
-    /// Small dim chevron so the divider is findable but unobtrusive.
-    private func tuckSeparatorImage() -> NSImage {
-        let image = NSImage(size: NSSize(width: 8, height: 16))
-        image.lockFocus()
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 9, weight: .semibold),
-            .foregroundColor: NSColor.tertiaryLabelColor
-        ]
-        let chevron = NSAttributedString(string: "\u{2039}", attributes: attrs)
-        chevron.draw(at: NSPoint(x: (8 - chevron.size().width) / 2, y: 1))
-        image.unlockFocus()
-        image.isTemplate = true
-        return image
-    }
-
-    private func toggleIconsCollapsed() {
-        viewModel.otherIconsCollapsed.toggle()
-        updateTuckSeparator()
-        rebuildMenu()
     }
 
     private func showSetupStatus() {
@@ -700,23 +641,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             iconItem.state = viewModel.showIcon ? .on : .off
             menu.addItem(iconItem)
 
-            // Tuck away other apps' menu bar icons
-            let tuckItem = NSMenuItem(title: "Tuck Away App Icons", action: #selector(toggleHideOtherIcons), keyEquivalent: "")
-            tuckItem.target = self
-            tuckItem.state = viewModel.hideOtherIcons ? .on : .off
-            tuckItem.toolTip = "Adds a ‹ divider — ⌘-drag icons (Claude, ChatGPT, Cursor…) to its left to hide them"
-            menu.addItem(tuckItem)
-
-            if viewModel.hideOtherIcons {
-                let revealItem = NSMenuItem(
-                    title: viewModel.otherIconsCollapsed ? "Show Tucked Icons" : "Hide Tucked Icons",
-                    action: #selector(toggleTuckedIcons),
-                    keyEquivalent: ""
-                )
-                revealItem.target = self
-                menu.addItem(revealItem)
-            }
-
             // Launch at login
             let launchItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
             launchItem.target = self
@@ -781,12 +705,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func statusBarButtonClicked() {
         let event = NSApp.currentEvent
-
-        // Option-click toggles the tucked-away icons.
-        if viewModel.hideOtherIcons, event?.modifierFlags.contains(.option) == true {
-            toggleIconsCollapsed()
-            return
-        }
 
         // Right click shows menu
         if event?.type == .rightMouseUp {
@@ -962,35 +880,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func toggleIcon() {
         viewModel.showIcon.toggle()
         NotificationCenter.default.post(name: NSNotification.Name("SettingsChanged"), object: nil)
-    }
-
-    @objc private func toggleHideOtherIcons() {
-        viewModel.hideOtherIcons.toggle()
-
-        if viewModel.hideOtherIcons {
-            // Start expanded so the user can see and drag icons into place.
-            viewModel.otherIconsCollapsed = false
-            updateTuckSeparator()
-            presentAlert(
-                title: "Tuck Away App Icons",
-                message: """
-                A small ‹ divider just appeared next to Usagebar.
-
-                1. Hold ⌘ and drag the icons you want hidden (Claude, ChatGPT, \
-                Cursor, …) to the LEFT of that divider.
-                2. ⌥-click the Usagebar icon (or use this menu) to hide or show \
-                them any time.
-                """,
-                style: .informational
-            )
-        } else {
-            updateTuckSeparator()
-        }
-        rebuildMenu()
-    }
-
-    @objc private func toggleTuckedIcons() {
-        toggleIconsCollapsed()
     }
 
     @objc private func toggleLaunchAtLogin() {

@@ -1,6 +1,6 @@
 cask "usagebar" do
-  version "1.5.0"
-  sha256 "4eaf7f670f9a69b43061ecb0787a467dc47616449499f957682e4df9a058fe81"
+  version "1.5.1"
+  sha256 "0e7feb39c41bf399df4504579b0ef613c59c8f8e67f1443bbc546f20bd88c54a"
 
   url "https://github.com/betoxf/Usagebar/releases/download/v#{version}/Usagebar.zip"
   name "Usagebar"

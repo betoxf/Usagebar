@@ -20,7 +20,14 @@ struct CodexUsageData {
     var creditBalance: Double?
     var isUnlimited: Bool = false
 
+    /// True once Codex's primary window is the weekly one (the old 5h window
+    /// was retired upstream); the separate secondary weekly is redundant then.
+    var primaryIsWeekly: Bool {
+        primaryWindowSeconds >= 7 * 24 * 3600
+    }
+
     var primaryWindowLabel: String {
+        if primaryIsWeekly { return "W" }
         let hours = primaryWindowSeconds / 3600
         return "\(hours)h"
     }

@@ -464,7 +464,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     primaryItem.attributedTitle = primaryString
                     menu.addItem(primaryItem)
 
-                    if codex.secondaryUsedPercent > 0 || codex.secondaryResetAt != nil {
+                    if !codex.primaryIsWeekly, codex.secondaryUsedPercent > 0 || codex.secondaryResetAt != nil {
                         let secondary = codex.secondaryUsedPercent
                         let secondaryReset = codex.timeUntilSecondaryReset
                         let secondaryColor = usageHighlightColor(
@@ -516,7 +516,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     usedPercent: cursor.usedPercent,
                     resetText: cursor.timeUntilReset,
                     error: viewModel.cursorError,
-                    accentColor: brandCursorColor
+                    accentColor: brandCursorColor,
+                    windowLabel: "M"
                 )
             }
 
@@ -533,7 +534,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     subtitle: planInfo,
                     usedPercent: zai.usedPercent,
                     resetText: zai.timeUntilReset,
-                    error: viewModel.zaiError
+                    error: viewModel.zaiError,
+                    windowLabel: zai.windowLabel
                 )
             }
 
@@ -1483,14 +1485,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 label: "Cursor",
                 brandColor: brandCursorColor,
                 usedPercent: viewModel.cursorUsageData.usedPercent,
-                glyph: .cursor
+                glyph: .cursor,
+                windowLabel: "M"
             )
         case .zai:
             return createSimpleProviderImage(
                 label: "z.ai",
                 brandColor: brandZaiColor,
                 usedPercent: viewModel.zaiUsageData.usedPercent,
-                glyph: .zai
+                glyph: .zai,
+                windowLabel: viewModel.zaiUsageData.windowLabel
             )
         }
     }
@@ -1504,11 +1508,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Compact status image for the single-percentage providers: brand glyph +
     /// name on top (when the icon is shown), one big percentage underneath.
+    /// `windowLabel` is the tiny window hint before the number (e.g. "M").
     private func createSimpleProviderImage(
         label: String,
         brandColor: NSColor,
         usedPercent: Int,
-        glyph: ProviderGlyph
+        glyph: ProviderGlyph,
+        windowLabel: String = ""
     ) -> (NSImage, CGFloat) {
         let showIcon = viewModel.showIcon
         let width: CGFloat = 50
@@ -1559,6 +1565,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .foregroundColor: valueColor
         ]
         let valuesString = NSMutableAttributedString()
+        if !windowLabel.isEmpty {
+            let tinyLabelAttributes: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 6, weight: .regular),
+                .foregroundColor: textColor.withAlphaComponent(0.7)
+            ]
+            valuesString.append(NSAttributedString(string: "\(windowLabel) ", attributes: tinyLabelAttributes))
+        }
         valuesString.append(NSAttributedString(string: "\(usedPercent)", attributes: numberAttributes))
         valuesString.append(NSAttributedString(string: "%", attributes: percentAttributes))
         valuesString.draw(at: NSPoint(x: (width - valuesString.size().width) / 2, y: yOffset))
@@ -1726,8 +1739,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func createCodexImage() -> (NSImage, CGFloat) {
         let showIcon = viewModel.showIcon
-        let showOnly5hr = viewModel.showOnly5hr
-        let showOnlyWeekly = viewModel.showOnlyWeekly
+        // Once Codex's primary window IS the weekly one, the secondary weekly
+        // is redundant — show a single "W X%" like the other one-value providers.
+        let primaryIsWeekly = viewModel.codexUsageData.primaryIsWeekly
+        let showOnly5hr = viewModel.showOnly5hr || primaryIsWeekly
+        let showOnlyWeekly = viewModel.showOnlyWeekly && !primaryIsWeekly
 
         var width: CGFloat = 80
         if showOnly5hr || showOnlyWeekly { width = 50 }
@@ -1879,7 +1895,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Header + single "used% • reset" row shared by Cursor and Zai.
-    /// `accentColor` (defaults to the title color) highlights high usage.
+    /// `accentColor` (defaults to the title color) highlights high usage;
+    /// `windowLabel` prefixes the row (e.g. "M" for a monthly window).
     private func appendSimpleProviderSection(
         title: String,
         titleColor: NSColor,
@@ -1887,7 +1904,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         usedPercent: Int,
         resetText: String,
         error: String?,
-        accentColor: NSColor? = nil
+        accentColor: NSColor? = nil,
+        windowLabel: String = ""
     ) {
         let header = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         header.isEnabled = false
@@ -1910,10 +1928,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             accentColor: accentColor ?? titleColor,
             fallback: NSColor.labelColor
         )
-        let row = NSMenuItem(title: "  \(usedPercent)%  \u{2022}  \(resetText)", action: nil, keyEquivalent: "")
+        let rowPrefix = windowLabel.isEmpty ? "  " : "  \(windowLabel): "
+        let row = NSMenuItem(title: "\(rowPrefix)\(usedPercent)%  \u{2022}  \(resetText)", action: nil, keyEquivalent: "")
         row.isEnabled = false
         let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11, weight: .regular)]
-        let rowString = NSMutableAttributedString(string: "  ", attributes: attrs)
+        let rowString = NSMutableAttributedString(string: rowPrefix, attributes: attrs)
         rowString.append(NSAttributedString(string: "\(usedPercent)", attributes: [
             .font: NSFont.systemFont(ofSize: 11, weight: .medium),
             .foregroundColor: valueColor

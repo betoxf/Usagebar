@@ -7,7 +7,7 @@ cask "usagebar" do
   desc "Menu bar app showing Claude and Codex usage statistics"
   homepage "https://github.com/betoxf/Usagebar"
 
-  depends_on macos: ">= :sonoma"
+  depends_on macos: :sonoma
 
   app "Usagebar.app"
 
@@ -18,9 +18,11 @@ cask "usagebar" do
                    args: ["-a", "#{appdir}/Usagebar.app"]
   end
 
+  uninstall quit: "bullfigherstudios.JustaUsageBar"
+
   zap trash: [
     "~/Library/Application Support/JustaUsageBar",
+    "~/Library/Caches/bullfigherstudios.JustaUsageBar",
     "~/Library/Preferences/bullfigherstudios.JustaUsageBar.plist",
-    "~/Library/Caches/bullfightertudios.JustaUsageBar",
   ]
 end

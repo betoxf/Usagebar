@@ -33,7 +33,7 @@ release:
 	@echo "Next steps:"
 	@echo "  1. Create a GitHub release with tag v<version>"
 	@echo "  2. Upload $(ZIP_PATH) to the release"
-	@echo "  3. Update Casks/usagebar.rb and compatibility casks with the SHA256 above"
+	@echo "  3. Update Casks/usagebar.rb with the SHA256 above"
 
 clean:
 	rm -rf $(BUILD_DIR) $(DERIVED_DATA_DIR)

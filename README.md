@@ -50,7 +50,7 @@ Upgrade later with `brew update && brew upgrade --cask usagebar`.
 
 ### Download a release
 
-Download `Usagebar.zip` from the [latest release](https://github.com/betoxf/Usagebar/releases/latest), move `Usagebar.app` to `/Applications`, and launch it.
+Download `Usagebar.zip` from the [latest release](https://github.com/betoxf/Usagebar/releases/latest). Quit any running Usagebar, replace `/Applications/Usagebar.app`, and launch the replacement. Do not keep or launch another copy from Downloads.
 
 > [!NOTE]
 > Current release artifacts are not notarized. The Homebrew cask clears the quarantine attribute during installation. If you prefer not to do that, build from source.

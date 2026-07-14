@@ -10,13 +10,13 @@ echo ""
 if command -v brew &>/dev/null; then
     echo "  [+] Homebrew found"
     echo "  [*] Installing via Homebrew..."
-    brew install betoxf/tap/usagebar
+    brew install --cask betoxf/tap/usagebar
     echo ""
     echo "  Done! Usagebar has been installed."
     echo ""
     echo "  To launch:  open -a Usagebar"
-    echo "  To update:  brew upgrade betoxf/tap/usagebar"
-    echo "  To remove:  brew uninstall usagebar"
+    echo "  To update:  brew upgrade --cask usagebar"
+    echo "  To remove:  brew uninstall --cask usagebar"
     echo ""
 else
     echo "  [!] Homebrew not found."

@@ -18,6 +18,7 @@ final class CredentialStorage {
         var sessionKey: String?
         var organizationId: String?
         var claudeOAuth: ClaudeOAuthCredentials?
+        var kimiCredential: String?
     }
 
     struct ClaudeOAuthCredentials: Codable {
@@ -70,9 +71,29 @@ final class CredentialStorage {
         }
     }
 
-    func clearAll() {
-        cachedCredentials = nil
-        try? FileManager.default.removeItem(at: credentialsFileURL)
+    var kimiCredential: String? {
+        get { cachedCredentials?.kimiCredential }
+        set {
+            if cachedCredentials == nil {
+                cachedCredentials = Credentials()
+            }
+            cachedCredentials?.kimiCredential = newValue
+            removeEmptyCredentialFileOrSave()
+        }
+    }
+
+    func clearClaudeCredentials() {
+        guard cachedCredentials != nil else { return }
+        cachedCredentials?.sessionKey = nil
+        cachedCredentials?.organizationId = nil
+        cachedCredentials?.claudeOAuth = nil
+        removeEmptyCredentialFileOrSave()
+    }
+
+    func clearKimiCredential() {
+        guard cachedCredentials != nil else { return }
+        cachedCredentials?.kimiCredential = nil
+        removeEmptyCredentialFileOrSave()
     }
 
     func clearClaudeOAuthCredentials() {
@@ -82,13 +103,20 @@ final class CredentialStorage {
 
         cachedCredentials?.claudeOAuth = nil
 
-        if cachedCredentials?.sessionKey == nil && cachedCredentials?.organizationId == nil {
+        removeEmptyCredentialFileOrSave()
+    }
+
+    private func removeEmptyCredentialFileOrSave() {
+        let isEmpty = cachedCredentials?.sessionKey == nil &&
+            cachedCredentials?.organizationId == nil &&
+            cachedCredentials?.claudeOAuth == nil &&
+            cachedCredentials?.kimiCredential == nil
+        if isEmpty {
             cachedCredentials = nil
             try? FileManager.default.removeItem(at: credentialsFileURL)
-            return
+        } else {
+            saveCredentials()
         }
-
-        saveCredentials()
     }
 
     // MARK: - File Storage

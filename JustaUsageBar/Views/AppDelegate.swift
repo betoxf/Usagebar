@@ -10,10 +10,11 @@ enum DisplayProvider: String, CaseIterable {
     case claude
     case codex
     case cursor
+    case kimi
     case zai
 
     /// Fixed left-to-right order used for cycling and menu layout.
-    static let displayOrder: [DisplayProvider] = [.claude, .codex, .cursor, .zai]
+    static let displayOrder: [DisplayProvider] = [.claude, .codex, .cursor, .kimi, .zai]
 }
 
 @MainActor
@@ -129,6 +130,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Cursor ships under a ToDesktop bundle id; match it and the app name.
         if bundleId == "com.todesktop.230313mzl4w4u92" || name == "cursor" {
             return .cursor
+        }
+        if bundleId.contains("kimi") || bundleId.hasPrefix("com.moonshot.") || name == "kimi" {
+            return .kimi
         }
         return nil
     }
@@ -283,11 +287,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let hasCodex = viewModel.hasCodexCredentials
         let hasCursor = viewModel.hasCursorCredentials
         let hasZai = viewModel.hasZaiCredentials
+        let hasKimi = viewModel.hasKimiCredentials
 
-        if !hasClaude && !hasCodex && !hasCursor && !hasZai {
+        if !hasClaude && !hasCodex && !hasCursor && !hasZai && !hasKimi {
             let setupItem = NSMenuItem(title: "Setup Usage Tracking", action: #selector(showCredentialsWindow), keyEquivalent: "")
             setupItem.target = self
             menu.addItem(setupItem)
+
+            let kimiSetupItem = NSMenuItem(title: "Set Up Kimi…", action: #selector(authenticateKimi), keyEquivalent: "")
+            kimiSetupItem.target = self
+            menu.addItem(kimiSetupItem)
         } else {
             // Claude usage section
             if viewModel.showClaude {
@@ -521,9 +530,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 )
             }
 
+            // Kimi usage section
+            if hasKimi && viewModel.showKimi {
+                if viewModel.showClaude || viewModel.showCodex || (hasCursor && viewModel.showCursor) {
+                    menu.addItem(NSMenuItem.separator())
+                }
+                appendKimiProviderSection()
+            }
+
             // Zai usage section
             if hasZai && viewModel.showZai {
-                if viewModel.showClaude || viewModel.showCodex || (hasCursor && viewModel.showCursor) {
+                if viewModel.showClaude || viewModel.showCodex ||
+                    (hasCursor && viewModel.showCursor) || (hasKimi && viewModel.showKimi) {
                     menu.addItem(NSMenuItem.separator())
                 }
                 let zai = viewModel.zaiUsageData
@@ -565,7 +583,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             displayMenu.addItem(onlyWeeklyItem)
 
             // Provider toggles
-            let authedProviderCount = [hasClaude, hasCodex, hasCursor, hasZai].filter { $0 }.count
+            let authedProviderCount = [hasClaude, hasCodex, hasCursor, hasKimi, hasZai].filter { $0 }.count
             if authedProviderCount > 0 {
                 displayMenu.addItem(NSMenuItem.separator())
 
@@ -590,6 +608,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     displayMenu.addItem(cursorToggle)
                 }
 
+                if hasKimi {
+                    let kimiToggle = NSMenuItem(title: "Show Kimi", action: #selector(toggleShowKimi), keyEquivalent: "")
+                    kimiToggle.target = self
+                    kimiToggle.state = viewModel.showKimi ? .on : .off
+                    displayMenu.addItem(kimiToggle)
+                }
+
                 if hasZai {
                     let zaiToggle = NSMenuItem(title: "Show z.ai", action: #selector(toggleShowZai), keyEquivalent: "")
                     zaiToggle.target = self
@@ -604,7 +629,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     let followItem = NSMenuItem(title: "Follow Active App", action: #selector(toggleFollowActiveApp), keyEquivalent: "")
                     followItem.target = self
                     followItem.state = viewModel.followActiveApp ? .on : .off
-                    followItem.toolTip = "Show a provider's usage when its app (Claude, ChatGPT/Codex, or Cursor) is in front"
+                    followItem.toolTip = "Show a provider's usage when its app (Claude, ChatGPT/Codex, Cursor, or Kimi) is in front"
                     displayMenu.addItem(followItem)
 
                     let intervalMenu = NSMenu()
@@ -662,6 +687,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let signOutCodex = NSMenuItem(title: "Sign Out Codex", action: #selector(signOutCodex), keyEquivalent: "")
                 signOutCodex.target = self
                 menu.addItem(signOutCodex)
+            }
+
+            if viewModel.hasSavedKimiCredential {
+                let forgetKimi = NSMenuItem(title: "Forget Saved Kimi Credential", action: #selector(clearKimiCredential), keyEquivalent: "")
+                forgetKimi.target = self
+                menu.addItem(forgetKimi)
+            } else if !hasKimi {
+                let setupKimi = NSMenuItem(title: "Set Up Kimi…", action: #selector(authenticateKimi), keyEquivalent: "")
+                setupKimi.target = self
+                menu.addItem(setupKimi)
             }
         }
 
@@ -800,6 +835,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
+    @objc private func authenticateKimi() {
+        let alert = NSAlert()
+        alert.messageText = "Set Up Kimi"
+        alert.informativeText = """
+        Run `kimi login` in Terminal, then click Refresh in Usagebar.
+
+        Usagebar reads Kimi Code CLI's local OAuth credential without changing it. You can also paste a Kimi Code API key or a `kimi-auth` web token.
+        """
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Paste Credential…")
+        alert.addButton(withTitle: "Open Kimi Console")
+        NSApp.activate(ignoringOtherApps: true)
+
+        switch alert.runModal() {
+        case .alertSecondButtonReturn:
+            showKimiCredentialPrompt()
+        case .alertThirdButtonReturn:
+            if let url = URL(string: "https://www.kimi.com/code/console") {
+                NSWorkspace.shared.open(url)
+            }
+        default:
+            break
+        }
+    }
+
+    private func showKimiCredentialPrompt() {
+        let alert = NSAlert()
+        alert.messageText = "Kimi Credential"
+        alert.informativeText = "Paste a Kimi Code API key or the `kimi-auth` token from the Kimi Code console. It is encrypted locally."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+
+        let credentialField = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
+        credentialField.placeholderString = "API key or kimi-auth token"
+        alert.accessoryView = credentialField
+
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let credential = credentialField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !credential.isEmpty else { return }
+        viewModel.saveKimiCredential(credential)
+        rebuildMenu()
+    }
+
     @objc private func showBoth() {
         viewModel.showOnly5hr = false
         viewModel.showOnlyWeekly = false
@@ -840,6 +921,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             (viewModel.showClaude && viewModel.hasClaudeCredentials) ||
             (viewModel.showCodex && viewModel.hasCodexCredentials) ||
             (viewModel.showCursor && viewModel.hasCursorCredentials) ||
+            (viewModel.showKimi && viewModel.hasKimiCredentials) ||
             (viewModel.showZai && viewModel.hasZaiCredentials)
         if !anyShown {
             viewModel[keyPath: keyPath] = true
@@ -861,6 +943,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func toggleShowCursor() {
         viewModel.showCursor.toggle()
         ensureAProviderRemainsShown(fallback: \.showCursor)
+        NotificationCenter.default.post(name: NSNotification.Name("SettingsChanged"), object: nil)
+    }
+
+    @objc private func toggleShowKimi() {
+        viewModel.showKimi.toggle()
+        ensureAProviderRemainsShown(fallback: \.showKimi)
         NotificationCenter.default.post(name: NSNotification.Name("SettingsChanged"), object: nil)
     }
 
@@ -903,6 +991,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func signOutCodex() {
         viewModel.clearCodexCredentials()
+        if !viewModel.hasCredentials {
+            stopProviderAnimation()
+            showSetupStatus()
+        } else {
+            syncCurrentProvider(persistPreference: true)
+            updateStatusImage()
+        }
+        rebuildMenu()
+    }
+
+    @objc private func clearKimiCredential() {
+        viewModel.clearKimiCredential()
         if !viewModel.hasCredentials {
             stopProviderAnimation()
             showSetupStatus()
@@ -1330,6 +1430,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return viewModel.hasCodexCredentials
         case .cursor:
             return viewModel.hasCursorCredentials
+        case .kimi:
+            return viewModel.hasKimiCredentials
         case .zai:
             return viewModel.hasZaiCredentials
         }
@@ -1343,6 +1445,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return viewModel.showCodex
         case .cursor:
             return viewModel.showCursor
+        case .kimi:
+            return viewModel.showKimi
         case .zai:
             return viewModel.showZai
         }
@@ -1488,6 +1592,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 glyph: .cursor,
                 windowLabel: "M"
             )
+        case .kimi:
+            let kimi = viewModel.kimiUsageData
+            let showWeekly = viewModel.showOnlyWeekly || kimi.fiveHourUsedPercent == nil
+            return createSimpleProviderImage(
+                label: "Kimi",
+                brandColor: brandKimiColor,
+                usedPercent: showWeekly ? kimi.weeklyUsedPercent : (kimi.fiveHourUsedPercent ?? 0),
+                glyph: .kimi,
+                windowLabel: showWeekly ? "W" : "5h"
+            )
         case .zai:
             return createSimpleProviderImage(
                 label: "z.ai",
@@ -1503,6 +1617,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private enum ProviderGlyph {
         case cursor
+        case kimi
         case zai
     }
 
@@ -1541,6 +1656,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // the menu bar theme instead of using the accent color.
             let glyphColor: NSColor = switch glyph {
             case .cursor: isDarkMode ? NSColor.white : NSColor(white: 0.1, alpha: 1.0)
+            case .kimi: brandColor
             case .zai: brandColor
             }
             drawGlyph(glyph, in: NSRect(x: startX, y: 13, width: glyphSize, height: glyphSize), color: glyphColor)
@@ -1614,6 +1730,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             fillFace([upLeft, top, upRight, center], alpha: 1.0)          // top
             fillFace([upLeft, center, bottom, downLeft], alpha: 0.62)     // left
             fillFace([center, upRight, downRight, bottom], alpha: 0.30)   // right
+        case .kimi:
+            let kAttrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 8, weight: .bold),
+                .foregroundColor: color
+            ]
+            let k = NSAttributedString(string: "K", attributes: kAttrs)
+            k.draw(at: NSPoint(x: rect.minX, y: rect.minY - 1))
         case .zai:
             let zAttrs: [NSAttributedString.Key: Any] = [
                 .font: NSFont.systemFont(ofSize: 8, weight: .bold),
@@ -1872,6 +1995,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSColor(red: 0.0, green: 0.75, blue: 0.65, alpha: 1.0)
     }
 
+    private var brandKimiColor: NSColor {
+        NSColor(red: 254 / 255, green: 96 / 255, blue: 60 / 255, alpha: 1.0)
+    }
+
     private var brandZaiColor: NSColor {
         NSColor(red: 0.91, green: 0.35, blue: 0.42, alpha: 1.0)
     }
@@ -1892,6 +2019,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var shouldPromptCodexAuthentication: Bool {
         !viewModel.hasCodexCredentials || viewModel.codexError == APIError.unauthorized.errorDescription
+    }
+
+    private func appendKimiProviderSection() {
+        let header = NSMenuItem(title: "Kimi", action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        let headerString = NSMutableAttributedString(string: "Kimi  ", attributes: [
+            .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
+            .foregroundColor: brandKimiColor
+        ])
+        let authSource = viewModel.kimiAuthSource.displayName
+        if !authSource.isEmpty {
+            headerString.append(NSAttributedString(string: authSource, attributes: [
+                .font: NSFont.systemFont(ofSize: 11, weight: .regular),
+                .foregroundColor: NSColor.secondaryLabelColor
+            ]))
+        }
+        header.attributedTitle = headerString
+        menu.addItem(header)
+
+        let kimi = viewModel.kimiUsageData
+        if let fiveHour = kimi.fiveHourUsedPercent {
+            appendKimiUsageRow(label: "5h", percentage: fiveHour, resetText: kimi.timeUntilFiveHourReset)
+        }
+        appendKimiUsageRow(label: "7d", percentage: kimi.weeklyUsedPercent, resetText: kimi.timeUntilWeeklyReset)
+
+        if let error = viewModel.kimiError {
+            menu.addItem(makeStatusMessageItem(error, color: .systemOrange))
+            let authItem = NSMenuItem(title: "Kimi Setup…", action: #selector(authenticateKimi), keyEquivalent: "")
+            authItem.target = self
+            menu.addItem(authItem)
+        }
+    }
+
+    private func appendKimiUsageRow(label: String, percentage: Int, resetText: String) {
+        let row = NSMenuItem(title: "  \(label): \(percentage)%  \u{2022}  \(resetText)", action: nil, keyEquivalent: "")
+        row.isEnabled = false
+        let valueColor = usageHighlightColor(
+            percentage: percentage,
+            highThreshold: label == "5h" ? 90 : 80,
+            accentColor: brandKimiColor,
+            fallback: NSColor.labelColor
+        )
+        let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11, weight: .regular)]
+        let rowString = NSMutableAttributedString(string: "  \(label): ", attributes: attrs)
+        rowString.append(NSAttributedString(string: "\(percentage)", attributes: [
+            .font: NSFont.systemFont(ofSize: 11, weight: .medium),
+            .foregroundColor: valueColor
+        ]))
+        rowString.append(NSAttributedString(string: "%  \u{2022}  \(resetText)", attributes: attrs))
+        row.attributedTitle = rowString
+        menu.addItem(row)
     }
 
     /// Header + single "used% • reset" row shared by Cursor and Zai.

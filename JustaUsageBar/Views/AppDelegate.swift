@@ -1824,7 +1824,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .kimi:
             let kAttrs: [NSAttributedString.Key: Any] = [
                 .font: NSFont.systemFont(ofSize: 8, weight: .bold),
-                .foregroundColor: color
+                .foregroundColor: NSColor.black
             ]
             let k = NSAttributedString(string: "K", attributes: kAttrs)
             k.draw(at: NSPoint(x: rect.minX, y: rect.minY - 1))

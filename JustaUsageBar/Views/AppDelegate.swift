@@ -301,7 +301,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             setupItem.target = self
             menu.addItem(setupItem)
 
-            let kimiSetupItem = NSMenuItem(title: "Set Up Kimi…", action: #selector(authenticateKimi), keyEquivalent: "")
+            let kimiSetupItem = NSMenuItem(title: "Set Up KimiCode…", action: #selector(authenticateKimi), keyEquivalent: "")
             kimiSetupItem.target = self
             menu.addItem(kimiSetupItem)
         } else {
@@ -616,7 +616,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
 
                 if hasKimi {
-                    let kimiToggle = NSMenuItem(title: "Show Kimi", action: #selector(toggleShowKimi), keyEquivalent: "")
+                    let kimiToggle = NSMenuItem(title: "Show KimiCode", action: #selector(toggleShowKimi), keyEquivalent: "")
                     kimiToggle.target = self
                     kimiToggle.state = viewModel.showKimi ? .on : .off
                     displayMenu.addItem(kimiToggle)
@@ -636,7 +636,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     let followItem = NSMenuItem(title: "Follow Active App", action: #selector(toggleFollowActiveApp), keyEquivalent: "")
                     followItem.target = self
                     followItem.state = viewModel.followActiveApp ? .on : .off
-                    followItem.toolTip = "Show a provider's usage when its app (Claude, ChatGPT/Codex, Cursor, or Kimi) is in front"
+                    followItem.toolTip = "Show a provider's usage when its app (Claude, ChatGPT/Codex, Cursor, or KimiCode) is in front"
                     displayMenu.addItem(followItem)
 
                     let intervalMenu = NSMenu()
@@ -697,11 +697,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
 
             if viewModel.hasSavedKimiCredential {
-                let forgetKimi = NSMenuItem(title: "Forget Saved Kimi Credential", action: #selector(clearKimiCredential), keyEquivalent: "")
+                let forgetKimi = NSMenuItem(title: "Forget Saved KimiCode Credential", action: #selector(clearKimiCredential), keyEquivalent: "")
                 forgetKimi.target = self
                 menu.addItem(forgetKimi)
             } else if !hasKimi {
-                let setupKimi = NSMenuItem(title: "Set Up Kimi…", action: #selector(authenticateKimi), keyEquivalent: "")
+                let setupKimi = NSMenuItem(title: "Set Up KimiCode…", action: #selector(authenticateKimi), keyEquivalent: "")
                 setupKimi.target = self
                 menu.addItem(setupKimi)
             }
@@ -844,7 +844,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func authenticateKimi() {
         let alert = NSAlert()
-        alert.messageText = "Set Up Kimi"
+        alert.messageText = "Set Up KimiCode"
         alert.informativeText = """
         Run `kimi login` in Terminal, then click Refresh in Usagebar.
 
@@ -853,7 +853,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
         alert.addButton(withTitle: "Paste Credential…")
-        alert.addButton(withTitle: "Open Kimi Console")
+        alert.addButton(withTitle: "Open KimiCode Console")
         NSApp.activate(ignoringOtherApps: true)
 
         switch alert.runModal() {
@@ -870,7 +870,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showKimiCredentialPrompt() {
         let alert = NSAlert()
-        alert.messageText = "Kimi Credential"
+        alert.messageText = "KimiCode Credential"
         alert.informativeText = "Paste a Kimi Code API key or the `kimi-auth` token from the Kimi Code console. It is encrypted locally."
         alert.alertStyle = .informational
         alert.addButton(withTitle: "Save")
@@ -1692,15 +1692,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 windowLabel: "M"
             )
         case .kimi:
-            let kimi = viewModel.kimiUsageData
-            let showWeekly = viewModel.showOnlyWeekly || kimi.fiveHourUsedPercent == nil
-            return createSimpleProviderImage(
-                label: "Kimi",
-                brandColor: brandKimiColor,
-                usedPercent: showWeekly ? kimi.weeklyUsedPercent : (kimi.fiveHourUsedPercent ?? 0),
-                glyph: .kimi,
-                windowLabel: showWeekly ? "W" : "5h"
-            )
+            return createKimiImage()
         case .zai:
             return createSimpleProviderImage(
                 label: "z.ai",
@@ -1836,6 +1828,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             ]
             let k = NSAttributedString(string: "K", attributes: kAttrs)
             k.draw(at: NSPoint(x: rect.minX, y: rect.minY - 1))
+
+            let accent = NSBezierPath()
+            accent.move(to: NSPoint(x: rect.minX + 5.4, y: rect.maxY - 0.4))
+            accent.line(to: NSPoint(x: rect.minX + 6.5, y: rect.maxY + 1.0))
+            accent.lineWidth = 1.1
+            accent.lineCapStyle = .round
+            brandKimiColor.setStroke()
+            accent.stroke()
         case .zai:
             let zAttrs: [NSAttributedString.Key: Any] = [
                 .font: NSFont.systemFont(ofSize: 8, weight: .bold),
@@ -1844,6 +1844,98 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let z = NSAttributedString(string: "Z", attributes: zAttrs)
             z.draw(at: NSPoint(x: rect.minX, y: rect.minY - 1))
         }
+    }
+
+    // MARK: - KimiCode Image
+
+    private func createKimiImage() -> (NSImage, CGFloat) {
+        let showIcon = viewModel.showIcon
+        let kimi = viewModel.kimiUsageData
+        let fiveHour = kimi.fiveHourUsedPercent
+        let showOnly5hr = viewModel.showOnly5hr && fiveHour != nil
+        let showOnlyWeekly = viewModel.showOnlyWeekly || fiveHour == nil
+        let width: CGFloat = showOnly5hr || showOnlyWeekly ? 50 : 80
+        let height: CGFloat = showIcon ? 22 : 16
+
+        let image = NSImage(size: NSSize(width: width, height: height))
+        image.lockFocus()
+
+        let isDarkMode = getDarkMode()
+        let textColor = isDarkMode ? NSColor.white : NSColor(white: 0.25, alpha: 1.0)
+        let yOffset: CGFloat = showIcon ? 0 : 3
+
+        if showIcon {
+            let glyphSize: CGFloat = 7
+            let labelAttributes: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 7, weight: .semibold),
+                .foregroundColor: textColor
+            ]
+            let labelString = NSAttributedString(string: " KimiCode", attributes: labelAttributes)
+            let totalWidth = glyphSize + labelString.size().width
+            let startX = (width - totalWidth) / 2
+
+            drawGlyph(
+                .kimi,
+                in: NSRect(x: startX, y: 13, width: glyphSize, height: glyphSize),
+                color: textColor
+            )
+            labelString.draw(at: NSPoint(x: startX + glyphSize, y: 12))
+        }
+
+        let weekly = kimi.weeklyUsedPercent
+        let fiveHourColor = usageHighlightColor(
+            percentage: fiveHour ?? 0,
+            highThreshold: 90,
+            accentColor: brandKimiColor,
+            fallback: textColor
+        )
+        let weeklyColor = usageHighlightColor(
+            percentage: weekly,
+            highThreshold: 80,
+            accentColor: brandKimiColor,
+            fallback: textColor
+        )
+        let tinyLabelAttributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 6, weight: .regular),
+            .foregroundColor: textColor.withAlphaComponent(0.7)
+        ]
+        let valuesString = NSMutableAttributedString()
+
+        if !showOnlyWeekly, let fiveHour {
+            valuesString.append(NSAttributedString(string: "5h ", attributes: tinyLabelAttributes))
+            valuesString.append(usageValueString(fiveHour, color: fiveHourColor))
+        }
+
+        if !showOnly5hr {
+            if !showOnlyWeekly {
+                valuesString.append(NSAttributedString(string: "  ", attributes: tinyLabelAttributes))
+            }
+            valuesString.append(NSAttributedString(string: "W ", attributes: tinyLabelAttributes))
+            valuesString.append(usageValueString(weekly, color: weeklyColor))
+        }
+
+        valuesString.draw(at: NSPoint(x: (width - valuesString.size().width) / 2, y: yOffset))
+
+        if availableUpdateVersion != nil {
+            brandClaudeColor.setFill()
+            NSBezierPath(ovalIn: NSRect(x: width - 5, y: height - 5, width: 4, height: 4)).fill()
+        }
+
+        image.unlockFocus()
+        image.isTemplate = false
+        return (image, width)
+    }
+
+    private func usageValueString(_ percentage: Int, color: NSColor) -> NSAttributedString {
+        let value = NSMutableAttributedString(string: "\(percentage)", attributes: [
+            .font: NSFont.systemFont(ofSize: 10, weight: .regular),
+            .foregroundColor: color
+        ])
+        value.append(NSAttributedString(string: "%", attributes: [
+            .font: NSFont.systemFont(ofSize: 10, weight: .medium),
+            .foregroundColor: color
+        ]))
+        return value
     }
 
     // MARK: - Claude Image
@@ -2095,7 +2187,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private var brandKimiColor: NSColor {
-        NSColor(red: 254 / 255, green: 96 / 255, blue: 60 / 255, alpha: 1.0)
+        NSColor(red: 0.10, green: 0.52, blue: 1.0, alpha: 1.0)
     }
 
     private var brandZaiColor: NSColor {
@@ -2121,9 +2213,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func appendKimiProviderSection() {
-        let header = NSMenuItem(title: "Kimi", action: nil, keyEquivalent: "")
+        let header = NSMenuItem(title: "KimiCode", action: nil, keyEquivalent: "")
         header.isEnabled = false
-        let headerString = NSMutableAttributedString(string: "Kimi  ", attributes: [
+        let headerString = NSMutableAttributedString(string: "KimiCode  ", attributes: [
             .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
             .foregroundColor: brandKimiColor
         ])
@@ -2145,7 +2237,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         if let error = viewModel.kimiError {
             menu.addItem(makeStatusMessageItem(error, color: .systemOrange))
-            let authItem = NSMenuItem(title: "Kimi Setup…", action: #selector(authenticateKimi), keyEquivalent: "")
+            let authItem = NSMenuItem(title: "KimiCode Setup…", action: #selector(authenticateKimi), keyEquivalent: "")
             authItem.target = self
             menu.addItem(authItem)
         }

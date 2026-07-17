@@ -45,7 +45,7 @@ struct PopoverView: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            if !viewModel.hasCredentials {
+            if !viewModel.hasClaudeCredentials {
                 authView
             } else {
                 usageView
@@ -190,7 +190,7 @@ struct PopoverView: View {
             HStack(spacing: 6) {
                 // Settings button
                 Button(action: {
-                    viewModel.clearCredentials()
+                    viewModel.clearClaudeCredentials()
                 }) {
                     Text("✳︎")
                         .font(.system(size: 8))

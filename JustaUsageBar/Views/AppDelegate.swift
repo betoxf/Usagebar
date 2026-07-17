@@ -10,10 +10,11 @@ enum DisplayProvider: String, CaseIterable {
     case claude
     case codex
     case cursor
+    case kimi
     case zai
 
     /// Fixed left-to-right order used for cycling and menu layout.
-    static let displayOrder: [DisplayProvider] = [.claude, .codex, .cursor, .zai]
+    static let displayOrder: [DisplayProvider] = [.claude, .codex, .cursor, .kimi, .zai]
 }
 
 @MainActor
@@ -23,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     nonisolated private static let lastInstalledUpdateAtDefaultsKey = "lastInstalledUpdateAt"
     nonisolated private static let latestReleaseAPIURL = URL(string: "https://api.github.com/repos/betoxf/Usagebar/releases/latest")!
     nonisolated private static let repositoryURL = URL(string: "https://github.com/betoxf/Usagebar")!
+    nonisolated private static let updateFailureFileName = "update-failure.txt"
 
     private var statusItem: NSStatusItem!
     private var menu: NSMenu!
@@ -46,12 +48,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     nonisolated private static let lastAutoUpdateVersionDefaultsKey = "lastAutoUpdateAttemptedVersion"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        guard !Self.hasAnotherRunningInstance else {
+            NSApp.terminate(nil)
+            return
+        }
+
         setupStatusItem()
         setupMenu()
         observeChanges()
         recordInstalledAppVersionIfNeeded()
 
         NSApp.setActivationPolicy(.accessory)
+        presentPendingUpdateFailureIfNeeded()
 
         if viewModel.hasCredentials {
             if viewModel.followActiveApp, let frontmost = NSWorkspace.shared.frontmostApplication {
@@ -129,6 +137,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Cursor ships under a ToDesktop bundle id; match it and the app name.
         if bundleId == "com.todesktop.230313mzl4w4u92" || name == "cursor" {
             return .cursor
+        }
+        if bundleId.contains("kimi") || bundleId.hasPrefix("com.moonshot.") || name == "kimi" {
+            return .kimi
         }
         return nil
     }
@@ -283,11 +294,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let hasCodex = viewModel.hasCodexCredentials
         let hasCursor = viewModel.hasCursorCredentials
         let hasZai = viewModel.hasZaiCredentials
+        let hasKimi = viewModel.hasKimiCredentials
 
-        if !hasClaude && !hasCodex && !hasCursor && !hasZai {
+        if !hasClaude && !hasCodex && !hasCursor && !hasZai && !hasKimi {
             let setupItem = NSMenuItem(title: "Setup Usage Tracking", action: #selector(showCredentialsWindow), keyEquivalent: "")
             setupItem.target = self
             menu.addItem(setupItem)
+
+            let kimiSetupItem = NSMenuItem(title: "Set Up KimiCode…", action: #selector(authenticateKimi), keyEquivalent: "")
+            kimiSetupItem.target = self
+            menu.addItem(kimiSetupItem)
         } else {
             // Claude usage section
             if viewModel.showClaude {
@@ -521,9 +537,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 )
             }
 
+            // Kimi usage section
+            if hasKimi && viewModel.showKimi {
+                if viewModel.showClaude || viewModel.showCodex || (hasCursor && viewModel.showCursor) {
+                    menu.addItem(NSMenuItem.separator())
+                }
+                appendKimiProviderSection()
+            }
+
             // Zai usage section
             if hasZai && viewModel.showZai {
-                if viewModel.showClaude || viewModel.showCodex || (hasCursor && viewModel.showCursor) {
+                if viewModel.showClaude || viewModel.showCodex ||
+                    (hasCursor && viewModel.showCursor) || (hasKimi && viewModel.showKimi) {
                     menu.addItem(NSMenuItem.separator())
                 }
                 let zai = viewModel.zaiUsageData
@@ -565,7 +590,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             displayMenu.addItem(onlyWeeklyItem)
 
             // Provider toggles
-            let authedProviderCount = [hasClaude, hasCodex, hasCursor, hasZai].filter { $0 }.count
+            let authedProviderCount = [hasClaude, hasCodex, hasCursor, hasKimi, hasZai].filter { $0 }.count
             if authedProviderCount > 0 {
                 displayMenu.addItem(NSMenuItem.separator())
 
@@ -590,6 +615,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     displayMenu.addItem(cursorToggle)
                 }
 
+                if hasKimi {
+                    let kimiToggle = NSMenuItem(title: "Show KimiCode", action: #selector(toggleShowKimi), keyEquivalent: "")
+                    kimiToggle.target = self
+                    kimiToggle.state = viewModel.showKimi ? .on : .off
+                    displayMenu.addItem(kimiToggle)
+                }
+
                 if hasZai {
                     let zaiToggle = NSMenuItem(title: "Show z.ai", action: #selector(toggleShowZai), keyEquivalent: "")
                     zaiToggle.target = self
@@ -604,7 +636,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     let followItem = NSMenuItem(title: "Follow Active App", action: #selector(toggleFollowActiveApp), keyEquivalent: "")
                     followItem.target = self
                     followItem.state = viewModel.followActiveApp ? .on : .off
-                    followItem.toolTip = "Show a provider's usage when its app (Claude, ChatGPT/Codex, or Cursor) is in front"
+                    followItem.toolTip = "Show a provider's usage when its app (Claude, ChatGPT/Codex, Cursor, or KimiCode) is in front"
                     displayMenu.addItem(followItem)
 
                     let intervalMenu = NSMenu()
@@ -662,6 +694,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let signOutCodex = NSMenuItem(title: "Sign Out Codex", action: #selector(signOutCodex), keyEquivalent: "")
                 signOutCodex.target = self
                 menu.addItem(signOutCodex)
+            }
+
+            if viewModel.hasSavedKimiCredential {
+                let forgetKimi = NSMenuItem(title: "Forget Saved KimiCode Credential", action: #selector(clearKimiCredential), keyEquivalent: "")
+                forgetKimi.target = self
+                menu.addItem(forgetKimi)
+            } else if !hasKimi {
+                let setupKimi = NSMenuItem(title: "Set Up KimiCode…", action: #selector(authenticateKimi), keyEquivalent: "")
+                setupKimi.target = self
+                menu.addItem(setupKimi)
             }
         }
 
@@ -800,6 +842,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
+    @objc private func authenticateKimi() {
+        let alert = NSAlert()
+        alert.messageText = "Set Up KimiCode"
+        alert.informativeText = """
+        Run `kimi login` in Terminal, then click Refresh in Usagebar.
+
+        Usagebar reads Kimi Code CLI's local OAuth credential without changing it. You can also paste a Kimi Code API key or a `kimi-auth` web token.
+        """
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Paste Credential…")
+        alert.addButton(withTitle: "Open KimiCode Console")
+        NSApp.activate(ignoringOtherApps: true)
+
+        switch alert.runModal() {
+        case .alertSecondButtonReturn:
+            showKimiCredentialPrompt()
+        case .alertThirdButtonReturn:
+            if let url = URL(string: "https://www.kimi.com/code/console") {
+                NSWorkspace.shared.open(url)
+            }
+        default:
+            break
+        }
+    }
+
+    private func showKimiCredentialPrompt() {
+        let alert = NSAlert()
+        alert.messageText = "KimiCode Credential"
+        alert.informativeText = "Paste a Kimi Code API key or the `kimi-auth` token from the Kimi Code console. It is encrypted locally."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+
+        let credentialField = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
+        credentialField.placeholderString = "API key or kimi-auth token"
+        alert.accessoryView = credentialField
+
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let credential = credentialField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !credential.isEmpty else { return }
+        viewModel.saveKimiCredential(credential)
+        rebuildMenu()
+    }
+
     @objc private func showBoth() {
         viewModel.showOnly5hr = false
         viewModel.showOnlyWeekly = false
@@ -840,6 +928,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             (viewModel.showClaude && viewModel.hasClaudeCredentials) ||
             (viewModel.showCodex && viewModel.hasCodexCredentials) ||
             (viewModel.showCursor && viewModel.hasCursorCredentials) ||
+            (viewModel.showKimi && viewModel.hasKimiCredentials) ||
             (viewModel.showZai && viewModel.hasZaiCredentials)
         if !anyShown {
             viewModel[keyPath: keyPath] = true
@@ -861,6 +950,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func toggleShowCursor() {
         viewModel.showCursor.toggle()
         ensureAProviderRemainsShown(fallback: \.showCursor)
+        NotificationCenter.default.post(name: NSNotification.Name("SettingsChanged"), object: nil)
+    }
+
+    @objc private func toggleShowKimi() {
+        viewModel.showKimi.toggle()
+        ensureAProviderRemainsShown(fallback: \.showKimi)
         NotificationCenter.default.post(name: NSNotification.Name("SettingsChanged"), object: nil)
     }
 
@@ -913,6 +1008,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         rebuildMenu()
     }
 
+    @objc private func clearKimiCredential() {
+        viewModel.clearKimiCredential()
+        if !viewModel.hasCredentials {
+            stopProviderAnimation()
+            showSetupStatus()
+        } else {
+            syncCurrentProvider(persistPreference: true)
+            updateStatusImage()
+        }
+        rebuildMenu()
+    }
+
     @objc private func checkForUpdates() {
         runUpdate(interactive: true)
     }
@@ -932,8 +1039,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             persistUpdateCheckMetadata(from: updateResult)
 
             switch updateResult {
-            case .updated(_):
-                relaunchApplication(at: appURL)
+            case .readyToInstall(_, let brewURL, let caskToken):
+                installPreparedUpdate(
+                    brewURL: brewURL,
+                    caskToken: caskToken,
+                    appURL: appURL,
+                    interactive: interactive
+                )
             case .alreadyUpToDate(let status):
                 availableUpdateVersion = nil
                 rebuildMenu()
@@ -978,13 +1090,90 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSWorkspace.shared.open(Self.repositoryURL)
     }
 
-    private func relaunchApplication(at appURL: URL) {
-        let config = NSWorkspace.OpenConfiguration()
-        config.createsNewApplicationInstance = true
-
-        NSWorkspace.shared.openApplication(at: appURL, configuration: config) { _, _ in
-            NSApp.terminate(nil)
+    private func installPreparedUpdate(
+        brewURL: URL,
+        caskToken: String,
+        appURL: URL,
+        interactive: Bool
+    ) {
+        guard let helperURL = Bundle.main.url(
+            forResource: "install_update_and_relaunch",
+            withExtension: "sh"
+        ) else {
+            handleUpdateHandoffFailure("The bundled update helper is missing.", interactive: interactive)
+            return
         }
+
+        let failureURL = Self.updateFailureURL
+        do {
+            try FileManager.default.createDirectory(
+                at: failureURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try? FileManager.default.removeItem(at: failureURL)
+            try? FileManager.default.removeItem(at: Self.updateLogURL)
+        } catch {
+            handleUpdateHandoffFailure(error.localizedDescription, interactive: interactive)
+            return
+        }
+
+        let helper = Process()
+        helper.executableURL = URL(fileURLWithPath: "/bin/sh")
+        helper.arguments = [
+            helperURL.path,
+            String(ProcessInfo.processInfo.processIdentifier),
+            brewURL.path,
+            caskToken,
+            appURL.path,
+            failureURL.path,
+            interactive ? "failure-interactive" : "failure-background"
+        ]
+
+        do {
+            try helper.run()
+            NSApp.terminate(nil)
+        } catch {
+            handleUpdateHandoffFailure(error.localizedDescription, interactive: interactive)
+        }
+    }
+
+    private func handleUpdateHandoffFailure(_ detail: String, interactive: Bool) {
+        UserDefaults.standard.removeObject(forKey: Self.lastAutoUpdateVersionDefaultsKey)
+        guard interactive else { return }
+
+        presentAlert(
+            title: "Update failed",
+            message: "Usagebar could not start the update helper.\n\(detail)",
+            style: .warning
+        )
+    }
+
+    private func presentPendingUpdateFailureIfNeeded() {
+        let failureURL = Self.updateFailureURL
+        try? FileManager.default.removeItem(at: Self.updateLogURL)
+        guard let result = try? String(contentsOf: failureURL, encoding: .utf8) else {
+            return
+        }
+        try? FileManager.default.removeItem(at: failureURL)
+
+        var lines = result.components(separatedBy: .newlines)
+        let failureKind = lines.isEmpty ? "" : lines.removeFirst()
+        let detail = lines
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if failureKind == "failure-background" {
+            UserDefaults.standard.removeObject(forKey: Self.lastAutoUpdateVersionDefaultsKey)
+            return
+        }
+        guard failureKind == "failure-interactive" else { return }
+
+        NSApp.activate(ignoringOtherApps: true)
+        presentAlert(
+            title: "Update failed",
+            message: detail.isEmpty ? "Homebrew could not install the update." : detail,
+            style: .warning
+        )
     }
 
     private func presentAlert(title: String, message: String, style: NSAlert.Style) {
@@ -1067,14 +1256,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private enum UpdateResult {
-        case updated(UpdateStatus)
+        case readyToInstall(UpdateStatus, URL, String)
         case alreadyUpToDate(UpdateStatus)
         case stillRollingOut(UpdateStatus)
         case failed(UpdateStatus, String)
 
         var status: UpdateStatus {
             switch self {
-            case .updated(let status), .alreadyUpToDate(let status), .stillRollingOut(let status), .failed(let status, _):
+            case .readyToInstall(let status, _, _),
+                 .alreadyUpToDate(let status),
+                 .stillRollingOut(let status),
+                 .failed(let status, _):
                 return status
             }
         }
@@ -1116,10 +1308,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return .alreadyUpToDate(status)
         }
 
-        return performHomebrewUpdate(status: status)
+        return prepareHomebrewUpdate(status: status)
     }
 
-    nonisolated private static func performHomebrewUpdate(status: UpdateStatus) -> UpdateResult {
+    nonisolated private static func prepareHomebrewUpdate(status: UpdateStatus) -> UpdateResult {
         guard let brewURL = brewExecutableURL() else {
             return .failed(status, """
             Homebrew was not found. Run in Terminal:
@@ -1128,19 +1320,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         do {
-            guard let installedCaskToken = try installedCaskToken(brewURL: brewURL) else {
-                return .failed(status, """
-                This copy of Usagebar is not managed by Homebrew cask.
-                Reinstall it with:
-                brew install --cask betoxf/tap/usagebar
-                """)
-            }
-
             let update = try runCommand(executableURL: brewURL, arguments: ["update", "--quiet"])
             guard update.status == 0 else {
                 return .failed(status, """
                 Homebrew update failed.
                 \(summarizeCommandOutput(update.output))
+                """)
+            }
+
+            guard let installedCaskToken = try installedCaskToken(brewURL: brewURL) else {
+                return .failed(status, """
+                This copy of Usagebar is not managed by Homebrew cask.
+                Reinstall it with:
+                brew install --cask betoxf/tap/usagebar
                 """)
             }
 
@@ -1172,20 +1364,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return .alreadyUpToDate(status)
             }
 
-            let upgrade = try runCommand(
-                executableURL: brewURL,
-                arguments: ["upgrade", "--cask", installedCaskToken],
-                environment: ["HOMEBREW_NO_AUTO_UPDATE": "1"]
-            )
-
-            guard upgrade.status == 0 else {
-                return .failed(status, """
-                Homebrew could not install the update.
-                \(summarizeCommandOutput(upgrade.output))
-                """)
-            }
-
-            return .updated(status)
+            return .readyToInstall(status, brewURL, installedCaskToken)
         } catch {
             return .failed(status, """
             Homebrew update failed.
@@ -1252,6 +1431,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             build: build,
             updatedAt: storedUpdatedAt ?? bundleUpdatedAt
         )
+    }
+
+    nonisolated private static var hasAnotherRunningInstance: Bool {
+        guard let bundleIdentifier = Bundle.main.bundleIdentifier else { return false }
+        let currentPID = ProcessInfo.processInfo.processIdentifier
+        return NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier)
+            .contains { application in
+                application.processIdentifier != currentPID && !application.isTerminated
+            }
+    }
+
+    nonisolated private static var updateFailureURL: URL {
+        FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("JustaUsageBar", isDirectory: true)
+            .appendingPathComponent(updateFailureFileName)
+    }
+
+    nonisolated private static var updateLogURL: URL {
+        URL(fileURLWithPath: updateFailureURL.path + ".log")
     }
 
     nonisolated private static func brewExecutableURL() -> URL? {
@@ -1330,6 +1529,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return viewModel.hasCodexCredentials
         case .cursor:
             return viewModel.hasCursorCredentials
+        case .kimi:
+            return viewModel.hasKimiCredentials
         case .zai:
             return viewModel.hasZaiCredentials
         }
@@ -1343,6 +1544,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return viewModel.showCodex
         case .cursor:
             return viewModel.showCursor
+        case .kimi:
+            return viewModel.showKimi
         case .zai:
             return viewModel.showZai
         }
@@ -1488,6 +1691,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 glyph: .cursor,
                 windowLabel: "M"
             )
+        case .kimi:
+            return createKimiImage()
         case .zai:
             return createSimpleProviderImage(
                 label: "z.ai",
@@ -1503,6 +1708,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private enum ProviderGlyph {
         case cursor
+        case kimi
         case zai
     }
 
@@ -1541,6 +1747,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // the menu bar theme instead of using the accent color.
             let glyphColor: NSColor = switch glyph {
             case .cursor: isDarkMode ? NSColor.white : NSColor(white: 0.1, alpha: 1.0)
+            case .kimi: brandColor
             case .zai: brandColor
             }
             drawGlyph(glyph, in: NSRect(x: startX, y: 13, width: glyphSize, height: glyphSize), color: glyphColor)
@@ -1614,6 +1821,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             fillFace([upLeft, top, upRight, center], alpha: 1.0)          // top
             fillFace([upLeft, center, bottom, downLeft], alpha: 0.62)     // left
             fillFace([center, upRight, downRight, bottom], alpha: 0.30)   // right
+        case .kimi:
+            let kAttrs: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 8, weight: .bold),
+                .foregroundColor: NSColor.black
+            ]
+            let k = NSAttributedString(string: "K", attributes: kAttrs)
+            k.draw(at: NSPoint(x: rect.minX, y: rect.minY - 1))
+
+            let accent = NSBezierPath()
+            accent.move(to: NSPoint(x: rect.minX + 5.4, y: rect.maxY - 0.4))
+            accent.line(to: NSPoint(x: rect.minX + 6.5, y: rect.maxY + 1.0))
+            accent.lineWidth = 1.1
+            accent.lineCapStyle = .round
+            brandKimiColor.setStroke()
+            accent.stroke()
         case .zai:
             let zAttrs: [NSAttributedString.Key: Any] = [
                 .font: NSFont.systemFont(ofSize: 8, weight: .bold),
@@ -1622,6 +1844,98 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let z = NSAttributedString(string: "Z", attributes: zAttrs)
             z.draw(at: NSPoint(x: rect.minX, y: rect.minY - 1))
         }
+    }
+
+    // MARK: - KimiCode Image
+
+    private func createKimiImage() -> (NSImage, CGFloat) {
+        let showIcon = viewModel.showIcon
+        let kimi = viewModel.kimiUsageData
+        let fiveHour = kimi.fiveHourUsedPercent
+        let showOnly5hr = viewModel.showOnly5hr && fiveHour != nil
+        let showOnlyWeekly = viewModel.showOnlyWeekly || fiveHour == nil
+        let width: CGFloat = showOnly5hr || showOnlyWeekly ? 50 : 80
+        let height: CGFloat = showIcon ? 22 : 16
+
+        let image = NSImage(size: NSSize(width: width, height: height))
+        image.lockFocus()
+
+        let isDarkMode = getDarkMode()
+        let textColor = isDarkMode ? NSColor.white : NSColor(white: 0.25, alpha: 1.0)
+        let yOffset: CGFloat = showIcon ? 0 : 3
+
+        if showIcon {
+            let glyphSize: CGFloat = 7
+            let labelAttributes: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 7, weight: .semibold),
+                .foregroundColor: textColor
+            ]
+            let labelString = NSAttributedString(string: " KimiCode", attributes: labelAttributes)
+            let totalWidth = glyphSize + labelString.size().width
+            let startX = (width - totalWidth) / 2
+
+            drawGlyph(
+                .kimi,
+                in: NSRect(x: startX, y: 13, width: glyphSize, height: glyphSize),
+                color: textColor
+            )
+            labelString.draw(at: NSPoint(x: startX + glyphSize, y: 12))
+        }
+
+        let weekly = kimi.weeklyUsedPercent
+        let fiveHourColor = usageHighlightColor(
+            percentage: fiveHour ?? 0,
+            highThreshold: 90,
+            accentColor: brandKimiColor,
+            fallback: textColor
+        )
+        let weeklyColor = usageHighlightColor(
+            percentage: weekly,
+            highThreshold: 80,
+            accentColor: brandKimiColor,
+            fallback: textColor
+        )
+        let tinyLabelAttributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 6, weight: .regular),
+            .foregroundColor: textColor.withAlphaComponent(0.7)
+        ]
+        let valuesString = NSMutableAttributedString()
+
+        if !showOnlyWeekly, let fiveHour {
+            valuesString.append(NSAttributedString(string: "5h ", attributes: tinyLabelAttributes))
+            valuesString.append(usageValueString(fiveHour, color: fiveHourColor))
+        }
+
+        if !showOnly5hr {
+            if !showOnlyWeekly {
+                valuesString.append(NSAttributedString(string: "  ", attributes: tinyLabelAttributes))
+            }
+            valuesString.append(NSAttributedString(string: "W ", attributes: tinyLabelAttributes))
+            valuesString.append(usageValueString(weekly, color: weeklyColor))
+        }
+
+        valuesString.draw(at: NSPoint(x: (width - valuesString.size().width) / 2, y: yOffset))
+
+        if availableUpdateVersion != nil {
+            brandClaudeColor.setFill()
+            NSBezierPath(ovalIn: NSRect(x: width - 5, y: height - 5, width: 4, height: 4)).fill()
+        }
+
+        image.unlockFocus()
+        image.isTemplate = false
+        return (image, width)
+    }
+
+    private func usageValueString(_ percentage: Int, color: NSColor) -> NSAttributedString {
+        let value = NSMutableAttributedString(string: "\(percentage)", attributes: [
+            .font: NSFont.systemFont(ofSize: 10, weight: .regular),
+            .foregroundColor: color
+        ])
+        value.append(NSAttributedString(string: "%", attributes: [
+            .font: NSFont.systemFont(ofSize: 10, weight: .medium),
+            .foregroundColor: color
+        ]))
+        return value
     }
 
     // MARK: - Claude Image
@@ -1872,6 +2186,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSColor(red: 0.0, green: 0.75, blue: 0.65, alpha: 1.0)
     }
 
+    private var brandKimiColor: NSColor {
+        NSColor(red: 0.10, green: 0.52, blue: 1.0, alpha: 1.0)
+    }
+
     private var brandZaiColor: NSColor {
         NSColor(red: 0.91, green: 0.35, blue: 0.42, alpha: 1.0)
     }
@@ -1892,6 +2210,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var shouldPromptCodexAuthentication: Bool {
         !viewModel.hasCodexCredentials || viewModel.codexError == APIError.unauthorized.errorDescription
+    }
+
+    private func appendKimiProviderSection() {
+        let header = NSMenuItem(title: "KimiCode", action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        let headerString = NSMutableAttributedString(string: "KimiCode  ", attributes: [
+            .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
+            .foregroundColor: brandKimiColor
+        ])
+        let authSource = viewModel.kimiAuthSource.displayName
+        if !authSource.isEmpty {
+            headerString.append(NSAttributedString(string: authSource, attributes: [
+                .font: NSFont.systemFont(ofSize: 11, weight: .regular),
+                .foregroundColor: NSColor.secondaryLabelColor
+            ]))
+        }
+        header.attributedTitle = headerString
+        menu.addItem(header)
+
+        let kimi = viewModel.kimiUsageData
+        if let fiveHour = kimi.fiveHourUsedPercent {
+            appendKimiUsageRow(label: "5h", percentage: fiveHour, resetText: kimi.timeUntilFiveHourReset)
+        }
+        appendKimiUsageRow(label: "7d", percentage: kimi.weeklyUsedPercent, resetText: kimi.timeUntilWeeklyReset)
+
+        if let error = viewModel.kimiError {
+            menu.addItem(makeStatusMessageItem(error, color: .systemOrange))
+            let authItem = NSMenuItem(title: "KimiCode Setup…", action: #selector(authenticateKimi), keyEquivalent: "")
+            authItem.target = self
+            menu.addItem(authItem)
+        }
+    }
+
+    private func appendKimiUsageRow(label: String, percentage: Int, resetText: String) {
+        let row = NSMenuItem(title: "  \(label): \(percentage)%  \u{2022}  \(resetText)", action: nil, keyEquivalent: "")
+        row.isEnabled = false
+        let valueColor = usageHighlightColor(
+            percentage: percentage,
+            highThreshold: label == "5h" ? 90 : 80,
+            accentColor: brandKimiColor,
+            fallback: NSColor.labelColor
+        )
+        let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 11, weight: .regular)]
+        let rowString = NSMutableAttributedString(string: "  \(label): ", attributes: attrs)
+        rowString.append(NSAttributedString(string: "\(percentage)", attributes: [
+            .font: NSFont.systemFont(ofSize: 11, weight: .medium),
+            .foregroundColor: valueColor
+        ]))
+        rowString.append(NSAttributedString(string: "%  \u{2022}  \(resetText)", attributes: attrs))
+        row.attributedTitle = rowString
+        menu.addItem(row)
     }
 
     /// Header + single "used% • reset" row shared by Cursor and Zai.

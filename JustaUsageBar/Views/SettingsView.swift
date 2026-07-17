@@ -34,7 +34,7 @@ struct SettingsView: View {
                 .buttonStyle(.plain)
             }
 
-            if viewModel.hasCredentials {
+            if viewModel.hasClaudeCredentials {
                 // Connected state - minimal
                 HStack(spacing: 4) {
                     Circle()
@@ -45,7 +45,7 @@ struct SettingsView: View {
                         .foregroundColor(.secondary)
                     Spacer()
                     Button("Sign out") {
-                        viewModel.clearCredentials()
+                        viewModel.clearClaudeCredentials()
                     }
                     .font(.system(size: 9))
                     .foregroundColor(.secondary)

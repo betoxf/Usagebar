@@ -17,6 +17,7 @@ flowchart LR
     end
     Services --> Claude["Anthropic usage API"]
     Services --> Codex["OpenAI usage API"]
+    Services --> Kimi["Kimi Code usage API"]
     UI --> Releases["GitHub Releases API"]
 ```
 
@@ -30,13 +31,14 @@ flowchart LR
 | `ClaudeAPIService` | Selects Claude authentication mode and normalizes responses. |
 | `ClaudeOAuthService` | Discovers Claude CLI credentials, refreshes OAuth tokens, and fetches usage. |
 | `CodexAPIService` | Discovers Codex credentials, resolves the base URL, refreshes OAuth, and normalizes usage. |
-| `CredentialStorage` | Encrypts Usagebar-managed Claude browser-session data locally. |
+| `KimiAPIService` | Discovers Kimi Code CLI credentials, selects API or web-token authentication, and normalizes weekly plus five-hour usage. |
+| `CredentialStorage` | Encrypts Usagebar-managed Claude browser-session data and optional Kimi credentials locally. |
 
 ## Runtime data flow
 
 1. `UsageViewModel` discovers available credentials during initialization.
 2. With at least one provider, it starts an immediate refresh and a two-minute timer.
-3. Claude and Codex refresh concurrently.
+3. Available providers refresh concurrently.
 4. Services validate responses and normalize payloads.
 5. The view model publishes state and posts `UsageDataChanged`.
 6. `AppDelegate` redraws the status item and rebuilds the menu.
@@ -49,6 +51,8 @@ Claude priority is: Usagebar's encrypted OAuth mirror, `~/.claude/.credentials.j
 
 Codex reads `${CODEX_HOME}/auth.json` or `~/.codex/auth.json`. It reads `chatgpt_base_url` from `${CODEX_HOME}/config.toml` when present and otherwise uses `https://chatgpt.com`.
 
+Kimi priority mirrors CodexBar: a saved or `KIMI_CODE_API_KEY` API key, a fresh Kimi Code CLI OAuth credential from `${KIMI_CODE_HOME}/credentials/kimi-code.json` (default `~/.kimi-code/credentials/kimi-code.json`), then a saved or `KIMI_AUTH_TOKEN` `kimi-auth` web token. Usagebar reads CLI-owned credentials in place and does not refresh or modify them.
+
 ## Network boundaries
 
 | Purpose | Default destination |
@@ -58,6 +62,8 @@ Codex reads `${CODEX_HOME}/auth.json` or `~/.codex/auth.json`. It reads `chatgpt
 | Claude browser-session usage | `https://claude.ai/api/organizations/{orgId}/usage` |
 | Codex usage | `https://chatgpt.com/backend-api/wham/usage` |
 | Codex OAuth refresh | `https://auth.openai.com/oauth/token` |
+| Kimi Code usage | `https://api.kimi.com/coding/v1/usages` |
+| Kimi web-token usage fallback | `https://www.kimi.com/apiv2/kimi.gateway.billing.v1.BillingService/GetUsages` |
 | Update discovery | `https://api.github.com/repos/betoxf/Usagebar/releases/latest` |
 
 A configured Codex base URL changes the Codex usage destination. Provider-private endpoints or payloads can change independently.
@@ -68,10 +74,12 @@ A configured Codex base URL changes the Codex usage destination. Provider-privat
 | --- | --- |
 | Display preferences | `UserDefaults` through `@AppStorage` |
 | Launch at login | `SMAppService.mainApp` |
-| Claude browser-session data and OAuth mirror | `~/Library/Application Support/JustaUsageBar/credentials.enc` |
+| Claude browser-session data, OAuth mirror, and optional Kimi credential | `~/Library/Application Support/JustaUsageBar/credentials.enc` |
 | Provider CLI credentials | Provider-owned files or Keychain items, read in place |
 
 Usagebar-managed credential data uses AES-256-GCM with a key derived from the Mac hardware UUID and an application salt.
+
+Homebrew updates use a quit-first handoff. Usagebar checks release and cask state while running, starts its bundled update helper, and terminates before Homebrew replaces the app. The cask quits any remaining old process and opens the installed replacement. The bundle also prohibits multiple instances, so a second copy cannot create another status item.
 
 The primary interface is AppKit for precise status-item drawing; SwiftUI is used for settings and authentication. The app runs as `LSUIElement`, so it has no normal Dock icon while running, but the application icon remains visible in Finder and installation surfaces.
 

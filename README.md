@@ -1,7 +1,7 @@
 <div align="center">
   <img src="assets/brand/usagebar-logo.png" alt="Usagebar" width="760">
 
-  <p><strong>Claude and Codex usage limits, directly in your macOS menu bar.</strong></p>
+  <p><strong>Claude, Codex, and KimiCode usage limits, directly in your macOS menu bar.</strong></p>
   <p>A private, native utility for checking rolling and weekly limits without breaking focus.</p>
 
   <p>
@@ -31,7 +31,7 @@ Usage limits matter most while you are working. Usagebar keeps the current five-
 
 | Capability | What it gives you |
 | --- | --- |
-| Claude + Codex | Track either provider or switch between both from one status item. |
+| Multiple providers | Track Claude, Codex, KimiCode, Cursor, and z.ai from one status item. |
 | At-a-glance limits | See rolling-window and weekly percentages without opening a browser. |
 | Native controls | Refresh, change display mode, switch provider cadence, and launch at login. |
 | Local credential discovery | Reuse supported Claude CLI and Codex CLI sessions already present on the Mac. |
@@ -50,7 +50,7 @@ Upgrade later with `brew update && brew upgrade --cask usagebar`.
 
 ### Download a release
 
-Download `Usagebar.zip` from the [latest release](https://github.com/betoxf/Usagebar/releases/latest), move `Usagebar.app` to `/Applications`, and launch it.
+Download `Usagebar.zip` from the [latest release](https://github.com/betoxf/Usagebar/releases/latest). Quit any running Usagebar, replace `/Applications/Usagebar.app`, and launch the replacement. Do not keep or launch another copy from Downloads.
 
 > [!NOTE]
 > Current release artifacts are not notarized. The Homebrew cask clears the quarantine attribute during installation. If you prefer not to do that, build from source.
@@ -58,8 +58,8 @@ Download `Usagebar.zip` from the [latest release](https://github.com/betoxf/Usag
 ### Requirements
 
 - macOS 14 Sonoma or newer
-- A Claude and/or Codex account
-- For zero-setup discovery, an authenticated Claude CLI or Codex CLI session
+- A supported provider account
+- For zero-setup discovery, an authenticated Claude, Codex, or Kimi Code CLI session
 
 ## Quick start
 
@@ -72,6 +72,7 @@ If a provider is not detected, authenticate its CLI and ask Usagebar to rediscov
 ```bash
 claude login
 codex login
+kimi login
 ```
 
 Claude also supports an in-app browser-session fallback from **Setup Usage Tracking**.
@@ -91,6 +92,11 @@ Cursor is discovered from the Cursor.app login (no extra setup). z.ai appears
 when a `Z_AI_API_KEY` is configured (environment variable or
 `~/.zai/config.json` with `{"apiKey": "..."}`).
 
+KimiCode is discovered from `~/.kimi-code/credentials/kimi-code.json` after
+`kimi login`. Usagebar uses the same Kimi Code usage source as CodexBar and
+shows the weekly quota plus the rolling five-hour window. A Kimi Code API key
+or `kimi-auth` web token can also be saved from **Set Up KimiCode…**.
+
 ### Fewer menu-bar icons
 
 Since Usagebar already shows your providers' usage, their own menu-bar icons
@@ -108,7 +114,7 @@ Bartender or Ice.)
 | --- | --- |
 | Refresh (`⌘R`) | Fetch the latest available limits immediately. |
 | Display mode | Show both windows, the five-hour window only, or the weekly window only. |
-| Provider visibility | Show Claude, Codex, or both. |
+| Provider visibility | Choose which detected providers appear and rotate. |
 | Switch cadence | Rotate providers automatically or switch manually with a left click. |
 | Launch at Login | Register or remove Usagebar as a macOS login item. |
 | Sign out | Reset the selected provider's Usagebar state; provider CLI sessions remain provider-owned. |
@@ -118,16 +124,16 @@ Bartender or Ice.)
 Usagebar is a local status-bar client. It discovers credentials already stored by provider tools, requests usage directly from the provider, normalizes the response, and renders it with AppKit.
 
 ```text
-Claude CLI / Keychain ─┐
-                       ├─> local credential discovery ─> provider API ─> menu-bar status
-Codex CLI auth.json ───┘
+Claude CLI / Keychain ───┐
+Codex CLI auth.json ─────┼─> local credential discovery ─> provider API ─> menu-bar status
+Kimi Code credentials ───┘
 ```
 
 The app refreshes in the background every two minutes by default. OAuth access tokens are refreshed when supported by the provider session. See [Architecture](docs/ARCHITECTURE.md) for component boundaries, credential priority, and network destinations.
 
 ## Privacy and security
 
-- Usage data travels directly between your Mac and Anthropic or OpenAI.
+- Usage data travels directly between your Mac and the selected provider.
 - Usagebar does not operate a backend and does not collect telemetry or analytics.
 - CLI credential files are read locally and are never copied to a Usagebar service.
 - Claude browser-session credentials saved by the app are encrypted locally with AES-256-GCM using a device-derived key.
@@ -182,8 +188,9 @@ Issues and focused pull requests are welcome. Start with [CONTRIBUTING.md](CONTR
 - [CodexBar](https://github.com/steipete/CodexBar) for authentication-flow inspiration
 - Anthropic for Claude and Claude Code
 - OpenAI for Codex
+- Moonshot AI for Kimi and Kimi Code
 
-Usagebar is an independent open-source project and is not affiliated with, endorsed by, or sponsored by Anthropic or OpenAI.
+Usagebar is an independent open-source project and is not affiliated with, endorsed by, or sponsored by these providers.
 
 ## License
 

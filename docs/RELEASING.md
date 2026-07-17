@@ -34,6 +34,13 @@ shasum -a 256 Usagebar.zip
 
 ## 5. Update Homebrew
 
-Update `version` and `sha256` in `Casks/usagebar.rb` and `Casks/justausagebar.rb`. Use the hash of the artifact downloaded from GitHub, not a separately built local archive.
+Update `version` and `sha256` in `Casks/usagebar.rb`. Keep `cask_renames.json` in the Homebrew tap so existing `justausagebar` installs migrate to the canonical `usagebar` token. Use the hash of the artifact downloaded from GitHub, not a separately built local archive.
 
-Verify `brew upgrade --cask usagebar`, review release notes for accuracy and secret leakage, and never move an existing version tag after publication.
+Verify `brew upgrade --cask usagebar`, then confirm all of the following:
+
+- exactly one `Usagebar` process is running from `/Applications/Usagebar.app`;
+- the installed bundle reports the new version and `LSMultipleInstancesProhibited = true`;
+- Homebrew's Caskroom contains only the current Usagebar version;
+- `brew info --cask justausagebar` resolves through the rename instead of exposing a second cask.
+
+Run `brew style Casks/usagebar.rb`, review release notes for accuracy and secret leakage, and never move an existing version tag after publication.

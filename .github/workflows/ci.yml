@@ -31,3 +31,11 @@ jobs:
             -derivedDataPath build/DerivedData \
             CODE_SIGNING_ALLOWED=NO \
             build
+      - name: Verify install and update safeguards
+        run: |
+          app="build/DerivedData/Build/Products/Debug/Usagebar.app"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :LSMultipleInstancesProhibited' "$app/Contents/Info.plist")" = "true"
+          test -f "$app/Contents/Resources/install_update_and_relaunch.sh"
+          test ! -e Casks/justausagebar.rb
+          ruby -c Casks/usagebar.rb
+          ruby -rjson -e 'abort unless JSON.parse(File.read("cask_renames.json")) == {"justausagebar" => "usagebar"}'

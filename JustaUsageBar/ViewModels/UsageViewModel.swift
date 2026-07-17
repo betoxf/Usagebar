@@ -33,6 +33,12 @@ final class UsageViewModel: ObservableObject {
     @Published var zaiUsageData: ZaiUsageData = .placeholder
     @Published var zaiError: String?
 
+    // MARK: - Kimi Published Properties
+
+    @Published var kimiUsageData: KimiUsageData = .placeholder
+    @Published var kimiAuthSource: KimiAuthSource = .none
+    @Published var kimiError: String?
+
     // MARK: - General
 
     @Published var isLoading: Bool = false
@@ -49,6 +55,7 @@ final class UsageViewModel: ObservableObject {
     @AppStorage("showCodex") var showCodex: Bool = true
     @AppStorage("showCursor") var showCursor: Bool = true
     @AppStorage("showZai") var showZai: Bool = true
+    @AppStorage("showKimi") var showKimi: Bool = true
     @AppStorage("animationInterval") var animationInterval: Double = 8.0
     @AppStorage("followActiveApp") var followActiveApp: Bool = true
     @AppStorage("autoUpdate") var autoUpdate: Bool = true
@@ -111,6 +118,8 @@ final class UsageViewModel: ObservableObject {
 
         // Codex: auto-detect from file
         // (CodexAPIService.shared.hasCredentials is checked directly)
+
+        kimiAuthSource = KimiAPIService.shared.detectedAuthSource
     }
 
     // MARK: - Public Methods
@@ -127,7 +136,8 @@ final class UsageViewModel: ObservableObject {
         async let codexResult: Void = refreshCodex()
         async let cursorResult: Void = refreshCursor()
         async let zaiResult: Void = refreshZai()
-        _ = await (claudeResult, codexResult, cursorResult, zaiResult)
+        async let kimiResult: Void = refreshKimi()
+        _ = await (claudeResult, codexResult, cursorResult, zaiResult, kimiResult)
 
         lastUpdated = Date()
         isLoading = false
@@ -139,6 +149,7 @@ final class UsageViewModel: ObservableObject {
         CodexAPIService.shared.clearCache()
         CursorAPIService.shared.clearCache()
         ZaiAPIService.shared.clearCache()
+        KimiAPIService.shared.clearCache()
         detectCredentials()
 
         if hasCredentials {
@@ -228,6 +239,32 @@ final class UsageViewModel: ObservableObject {
         }
     }
 
+    private func refreshKimi() async {
+        guard hasKimiCredentials else {
+            kimiError = nil
+            kimiAuthSource = .none
+            return
+        }
+
+        do {
+            kimiUsageData = try await KimiAPIService.shared.fetchUsage()
+            kimiAuthSource = KimiAPIService.shared.lastAuthSource
+            kimiError = nil
+        } catch let error as KimiServiceError {
+            kimiAuthSource = KimiAPIService.shared.detectedAuthSource
+            kimiError = error.errorDescription
+            print("Kimi Error: \(error.errorDescription ?? "Unknown")")
+        } catch let error as APIError {
+            kimiAuthSource = KimiAPIService.shared.detectedAuthSource
+            kimiError = error.errorDescription
+            print("Kimi Error: \(error.errorDescription ?? "Unknown")")
+        } catch {
+            kimiAuthSource = KimiAPIService.shared.detectedAuthSource
+            kimiError = error.localizedDescription
+            print("Kimi Error: \(error)")
+        }
+    }
+
     func startAutoRefresh() {
         stopAutoRefresh()
 
@@ -263,7 +300,7 @@ final class UsageViewModel: ObservableObject {
     // MARK: - Credentials
 
     var hasCredentials: Bool {
-        hasClaudeCredentials || hasCodexCredentials || hasCursorCredentials || hasZaiCredentials
+        hasClaudeCredentials || hasCodexCredentials || hasCursorCredentials || hasZaiCredentials || hasKimiCredentials
     }
 
     var hasClaudeCredentials: Bool {
@@ -282,6 +319,14 @@ final class UsageViewModel: ObservableObject {
         ZaiAPIService.shared.hasCredentials
     }
 
+    var hasKimiCredentials: Bool {
+        KimiAPIService.shared.hasCredentials
+    }
+
+    var hasSavedKimiCredential: Bool {
+        KimiAPIService.shared.hasSavedCredential
+    }
+
     /// Number of authenticated providers the user has toggled on.
     private var activeShownProviderCount: Int {
         var count = 0
@@ -289,6 +334,7 @@ final class UsageViewModel: ObservableObject {
         if showCodex && hasCodexCredentials { count += 1 }
         if showCursor && hasCursorCredentials { count += 1 }
         if showZai && hasZaiCredentials { count += 1 }
+        if showKimi && hasKimiCredentials { count += 1 }
         return count
     }
 
@@ -317,7 +363,7 @@ final class UsageViewModel: ObservableObject {
     }
 
     func clearClaudeCredentials() {
-        CredentialStorage.shared.clearAll()
+        CredentialStorage.shared.clearClaudeCredentials()
         ClaudeOAuthService.shared.clearPersistedCredentials()
         claudeAuthSource = .none
         usageData = .placeholder
@@ -336,10 +382,23 @@ final class UsageViewModel: ObservableObject {
         }
     }
 
-    func clearCredentials() {
-        clearClaudeCredentials()
-        clearCodexCredentials()
-        error = "Credentials cleared"
+    func saveKimiCredential(_ credential: String) {
+        CredentialStorage.shared.kimiCredential = credential.trimmingCharacters(in: .whitespacesAndNewlines)
+        KimiAPIService.shared.clearCache()
+        detectCredentials()
+        startAutoRefresh()
+        Task { await refresh() }
+    }
+
+    func clearKimiCredential() {
+        CredentialStorage.shared.clearKimiCredential()
+        KimiAPIService.shared.clearCache()
+        kimiUsageData = .placeholder
+        kimiError = nil
+        detectCredentials()
+        if !hasCredentials {
+            stopAutoRefresh()
+        }
     }
 
     // MARK: - Display Helpers

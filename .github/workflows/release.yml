@@ -25,6 +25,12 @@ jobs:
             -derivedDataPath build/DerivedData \
             build
 
+      - name: Verify install and update safeguards
+        run: |
+          app="build/DerivedData/Build/Products/Release/Usagebar.app"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :LSMultipleInstancesProhibited' "$app/Contents/Info.plist")" = "true"
+          test -f "$app/Contents/Resources/install_update_and_relaunch.sh"
+
       - name: Create zip
         run: |
           mkdir -p build/Release

@@ -51,7 +51,7 @@ Claude priority is: Usagebar's encrypted OAuth mirror, `~/.claude/.credentials.j
 
 Codex reads `${CODEX_HOME}/auth.json` or `~/.codex/auth.json`. It reads `chatgpt_base_url` from `${CODEX_HOME}/config.toml` when present and otherwise uses `https://chatgpt.com`.
 
-Kimi priority mirrors CodexBar: a saved or `KIMI_CODE_API_KEY` API key, a fresh Kimi Code CLI OAuth credential from `${KIMI_CODE_HOME}/credentials/kimi-code.json` (default `~/.kimi-code/credentials/kimi-code.json`), then a saved or `KIMI_AUTH_TOKEN` `kimi-auth` web token. Usagebar reads CLI-owned credentials in place and does not refresh or modify them.
+Kimi priority mirrors CodexBar: a saved or `KIMI_CODE_API_KEY` API key, a Kimi Code CLI OAuth credential from `${KIMI_CODE_HOME}/credentials/kimi-code.json` (default `~/.kimi-code/credentials/kimi-code.json`), then a saved or `KIMI_AUTH_TOKEN` `kimi-auth` web token. Usagebar refreshes an expiring CLI access token through Kimi Code's OAuth endpoint and atomically writes the rotated token bundle back to the same CLI-owned file with mode `0600`. The refresh coordinates with Kimi Code's `oauth/kimi-code.lock` convention so concurrent CLI and menu-bar refreshes do not overwrite one another.
 
 ## Network boundaries
 
@@ -63,6 +63,7 @@ Kimi priority mirrors CodexBar: a saved or `KIMI_CODE_API_KEY` API key, a fresh 
 | Codex usage | `https://chatgpt.com/backend-api/wham/usage` |
 | Codex OAuth refresh | `https://auth.openai.com/oauth/token` |
 | Kimi Code usage | `https://api.kimi.com/coding/v1/usages` |
+| Kimi Code OAuth refresh | `https://auth.kimi.com/api/oauth/token` |
 | Kimi web-token usage fallback | `https://www.kimi.com/apiv2/kimi.gateway.billing.v1.BillingService/GetUsages` |
 | Update discovery | `https://api.github.com/repos/betoxf/Usagebar/releases/latest` |
 
@@ -75,7 +76,7 @@ A configured Codex base URL changes the Codex usage destination. Provider-privat
 | Display preferences | `UserDefaults` through `@AppStorage` |
 | Launch at login | `SMAppService.mainApp` |
 | Claude browser-session data, OAuth mirror, and optional Kimi credential | `~/Library/Application Support/JustaUsageBar/credentials.enc` |
-| Provider CLI credentials | Provider-owned files or Keychain items, read in place |
+| Provider CLI credentials | Provider-owned files or Keychain items; Kimi OAuth tokens may be refreshed in place, while other provider credentials are read only |
 
 Usagebar-managed credential data uses AES-256-GCM with a key derived from the Mac hardware UUID and an application salt.
 

@@ -64,6 +64,7 @@ struct KimiUsageData {
 enum KimiServiceError: LocalizedError {
     case noCredentials
     case expiredCLICredential
+    case refreshInProgress
     case unauthorized
     case rateLimited
     case invalidResponse
@@ -75,6 +76,8 @@ enum KimiServiceError: LocalizedError {
             return "Run `kimi login` or add a KimiCode credential"
         case .expiredCLICredential:
             return "KimiCode CLI login expired — run `kimi login` again"
+        case .refreshInProgress:
+            return "KimiCode login is being refreshed — try again in a moment"
         case .unauthorized:
             return "KimiCode credential expired — sign in again"
         case .rateLimited:
@@ -91,10 +94,16 @@ final class KimiAPIService {
     static let shared = KimiAPIService()
 
     private let codeUsageURL = URL(string: "https://api.kimi.com/coding/v1/usages")!
+    private let cliOAuthTokenURL = URL(string: "https://auth.kimi.com/api/oauth/token")!
     private let webUsageURL = URL(
         string: "https://www.kimi.com/apiv2/kimi.gateway.billing.v1.BillingService/GetUsages"
     )!
     private let session: URLSession
+
+    private static let cliOAuthClientID = "17e5f671-d194-4dfb-9706-5516cb48c098"
+    private static let cliRefreshLockWaitNanoseconds: UInt64 = 100_000_000
+    private static let cliRefreshLockAttemptCount = 100
+    private static let cliRefreshLockStaleInterval: TimeInterval = 10
 
     private(set) var lastAuthSource: KimiAuthSource = .none
 
@@ -165,6 +174,9 @@ final class KimiAPIService {
                 case .codeAPI(let token, let source):
                     usage = try await fetchCodeAPIUsage(token: token, includeCLIIdentity: source == .cli)
                     lastAuthSource = source
+                case .cliOAuth(let credential):
+                    usage = try await fetchCLIUsage(credential: credential)
+                    lastAuthSource = .cli
                 case .web(let token):
                     usage = try await fetchWebUsage(token: token)
                     lastAuthSource = .webToken
@@ -189,6 +201,7 @@ final class KimiAPIService {
 
     private enum CredentialCandidate {
         case codeAPI(String, KimiAuthSource)
+        case cliOAuth(KimiCodeOAuthCredential)
         case web(String)
     }
 
@@ -209,8 +222,8 @@ final class KimiAPIService {
             apiCandidates.append(.codeAPI(apiKey, .apiKey))
         }
 
-        if let cliToken = freshCLIAccessToken {
-            apiCandidates.append(.codeAPI(cliToken, .cli))
+        if let credential = loadCLICredential(), credential.hasToken {
+            apiCandidates.append(.cliOAuth(credential))
         }
 
         if let webToken = extractWebToken(from: environment["KIMI_AUTH_TOKEN"]) {
@@ -234,27 +247,259 @@ final class KimiAPIService {
             .appendingPathComponent("kimi-code.json", isDirectory: false)
     }
 
-    private var freshCLIAccessToken: String? {
-        guard let credential = loadCLICredential(),
-              let token = normalized(credential.accessToken),
-              let expiresAt = credential.expiresAt,
-              expiresAt > Date().addingTimeInterval(60).timeIntervalSince1970 else {
-            return nil
-        }
-        return token
+    private var cliRefreshLockURL: URL {
+        kimiCodeHomeURL
+            .appendingPathComponent("oauth", isDirectory: true)
+            .appendingPathComponent("kimi-code.lock", isDirectory: true)
     }
 
     private var hasExpiredCLICredential: Bool {
         guard let credential = loadCLICredential() else { return false }
-        let hasToken = normalized(credential.accessToken) != nil || normalized(credential.refreshToken) != nil
-        guard hasToken else { return false }
-        guard let expiresAt = credential.expiresAt else { return true }
-        return expiresAt <= Date().addingTimeInterval(60).timeIntervalSince1970
+        guard credential.hasToken else { return false }
+        return !isCLIAccessTokenFresh(credential)
     }
 
     private func loadCLICredential() -> KimiCodeOAuthCredential? {
         guard let data = try? Data(contentsOf: cliCredentialURL) else { return nil }
         return try? JSONDecoder().decode(KimiCodeOAuthCredential.self, from: data)
+    }
+
+    private func fetchCLIUsage(credential: KimiCodeOAuthCredential) async throws -> KimiUsageData {
+        let token = try await usableCLIAccessToken(from: credential)
+        do {
+            return try await fetchCodeAPIUsage(token: token, includeCLIIdentity: true)
+        } catch KimiServiceError.unauthorized {
+            let latestCredential = loadCLICredential() ?? credential
+            let refreshedToken = try await usableCLIAccessToken(from: latestCredential, forceRefresh: true)
+            return try await fetchCodeAPIUsage(token: refreshedToken, includeCLIIdentity: true)
+        }
+    }
+
+    private func usableCLIAccessToken(
+        from initialCredential: KimiCodeOAuthCredential,
+        forceRefresh: Bool = false
+    ) async throws -> String {
+        if !forceRefresh,
+           isCLIAccessTokenFresh(initialCredential),
+           let token = normalized(initialCredential.accessToken) {
+            return token
+        }
+
+        guard try await acquireCLIRefreshLock() else {
+            if let credential = loadCLICredential(),
+               isCLIAccessTokenFresh(credential),
+               let token = normalized(credential.accessToken) {
+                return token
+            }
+            throw KimiServiceError.refreshInProgress
+        }
+        defer { releaseCLIRefreshLock() }
+
+        guard let currentCredential = loadCLICredential() else {
+            throw KimiServiceError.noCredentials
+        }
+
+        let credentialChanged = currentCredential.refreshToken != initialCredential.refreshToken ||
+            currentCredential.accessToken != initialCredential.accessToken ||
+            currentCredential.expiresAt != initialCredential.expiresAt
+        if (!forceRefresh || credentialChanged),
+           isCLIAccessTokenFresh(currentCredential),
+           let token = normalized(currentCredential.accessToken) {
+            return token
+        }
+
+        guard let refreshToken = normalized(currentCredential.refreshToken) else {
+            throw KimiServiceError.expiredCLICredential
+        }
+
+        let refreshedCredential = try await refreshCLICredential(refreshToken: refreshToken)
+
+        // A peer that did not observe our lock may have rotated the token
+        // while the request was in flight. Preserve the newer bundle rather
+        // than overwriting it with a response based on an older refresh token.
+        if let latestCredential = loadCLICredential(),
+           latestCredential.refreshToken != currentCredential.refreshToken,
+           isCLIAccessTokenFresh(latestCredential),
+           let token = normalized(latestCredential.accessToken) {
+            return token
+        }
+
+        try persistCLICredential(refreshedCredential)
+        return refreshedCredential.accessToken
+    }
+
+    private func isCLIAccessTokenFresh(_ credential: KimiCodeOAuthCredential) -> Bool {
+        guard normalized(credential.accessToken) != nil,
+              let expiresAt = credential.expiresAt else {
+            return false
+        }
+        let refreshThreshold = max(300, (credential.expiresIn ?? 0) * 0.5)
+        return expiresAt - Date().timeIntervalSince1970 > refreshThreshold
+    }
+
+    private func acquireCLIRefreshLock() async throws -> Bool {
+        let fileManager = FileManager.default
+        let oauthDirectory = cliRefreshLockURL.deletingLastPathComponent()
+        try fileManager.createDirectory(
+            at: oauthDirectory,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+        try? fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: oauthDirectory.path)
+
+        for _ in 0..<Self.cliRefreshLockAttemptCount {
+            do {
+                try fileManager.createDirectory(
+                    at: cliRefreshLockURL,
+                    withIntermediateDirectories: false,
+                    attributes: [.posixPermissions: 0o700]
+                )
+                // Kimi Code's proper-lockfile client considers a lock stale
+                // after five seconds. A future mtime keeps this compatible
+                // while our bounded network request is in flight.
+                try? fileManager.setAttributes(
+                    [.modificationDate: Date().addingTimeInterval(60)],
+                    ofItemAtPath: cliRefreshLockURL.path
+                )
+                return true
+            } catch {
+                let nsError = error as NSError
+                guard nsError.domain == NSCocoaErrorDomain,
+                      nsError.code == CocoaError.fileWriteFileExists.rawValue else {
+                    throw error
+                }
+
+                if isCLIRefreshLockStale() {
+                    try? fileManager.removeItem(at: cliRefreshLockURL)
+                    continue
+                }
+
+                try await Task.sleep(nanoseconds: Self.cliRefreshLockWaitNanoseconds)
+            }
+        }
+        return false
+    }
+
+    private func isCLIRefreshLockStale() -> Bool {
+        guard let values = try? cliRefreshLockURL.resourceValues(forKeys: [.contentModificationDateKey]),
+              let modifiedAt = values.contentModificationDate else {
+            return false
+        }
+        return Date().timeIntervalSince(modifiedAt) > Self.cliRefreshLockStaleInterval
+    }
+
+    private func releaseCLIRefreshLock() {
+        try? FileManager.default.removeItem(at: cliRefreshLockURL)
+    }
+
+    private func refreshCLICredential(refreshToken: String) async throws -> KimiCodeOAuthCredential {
+        var request = URLRequest(url: cliOAuthTokenURL)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        for (name, value) in cliIdentityHeaders() {
+            request.setValue(value, forHTTPHeaderField: name)
+        }
+
+        var form = URLComponents()
+        form.queryItems = [
+            URLQueryItem(name: "client_id", value: Self.cliOAuthClientID),
+            URLQueryItem(name: "grant_type", value: "refresh_token"),
+            URLQueryItem(name: "refresh_token", value: refreshToken)
+        ]
+        guard let body = form.percentEncodedQuery?.data(using: .utf8) else {
+            throw KimiServiceError.invalidResponse
+        }
+        request.httpBody = body
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch {
+            throw APIError.networkError(error)
+        }
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw KimiServiceError.invalidResponse
+        }
+        switch httpResponse.statusCode {
+        case 200:
+            break
+        case 401, 403:
+            throw KimiServiceError.expiredCLICredential
+        case 429:
+            throw KimiServiceError.rateLimited
+        default:
+            throw KimiServiceError.httpStatus(httpResponse.statusCode)
+        }
+
+        guard let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let accessToken = normalized(payload["access_token"] as? String),
+              let newRefreshToken = normalized(payload["refresh_token"] as? String),
+              let expiresIn = number(payload["expires_in"]),
+              expiresIn > 0 else {
+            throw KimiServiceError.invalidResponse
+        }
+
+        return KimiCodeOAuthCredential(
+            accessToken: accessToken,
+            refreshToken: newRefreshToken,
+            expiresAt: Date().timeIntervalSince1970 + expiresIn,
+            expiresIn: expiresIn,
+            scope: payload["scope"] as? String ?? "",
+            tokenType: payload["token_type"] as? String ?? "Bearer"
+        )
+    }
+
+    private func persistCLICredential(_ credential: KimiCodeOAuthCredential) throws {
+        let fileManager = FileManager.default
+        let directory = cliCredentialURL.deletingLastPathComponent()
+        try fileManager.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700]
+        )
+        try? fileManager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+
+        var payload: [String: Any] = [:]
+        if let currentData = try? Data(contentsOf: cliCredentialURL),
+           let currentPayload = try? JSONSerialization.jsonObject(with: currentData) as? [String: Any] {
+            payload = currentPayload
+        }
+        payload["access_token"] = credential.accessToken
+        payload["refresh_token"] = credential.refreshToken
+        payload["expires_at"] = Int(credential.expiresAt ?? 0)
+        payload["expires_in"] = Int(credential.expiresIn ?? 0)
+        payload["scope"] = credential.scope
+        payload["token_type"] = credential.tokenType
+
+        var data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
+        data.append(0x0A)
+
+        let temporaryURL = directory.appendingPathComponent(
+            ".kimi-code.json.tmp.\(ProcessInfo.processInfo.processIdentifier).\(UUID().uuidString)"
+        )
+        guard fileManager.createFile(
+            atPath: temporaryURL.path,
+            contents: data,
+            attributes: [.posixPermissions: 0o600]
+        ) else {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        defer { try? fileManager.removeItem(at: temporaryURL) }
+
+        if fileManager.fileExists(atPath: cliCredentialURL.path) {
+            _ = try fileManager.replaceItemAt(
+                cliCredentialURL,
+                withItemAt: temporaryURL,
+                backupItemName: nil,
+                options: [.usingNewMetadataOnly]
+            )
+        } else {
+            try fileManager.moveItem(at: temporaryURL, to: cliCredentialURL)
+        }
+        try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: cliCredentialURL.path)
     }
 
     private func normalized(_ raw: String?) -> String? {
@@ -502,11 +747,38 @@ private struct KimiCodeOAuthCredential: Decodable {
     let accessToken: String
     let refreshToken: String
     let expiresAt: TimeInterval?
+    let expiresIn: TimeInterval?
+    let scope: String
+    let tokenType: String
+
+    var hasToken: Bool {
+        !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+            !refreshToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 
     private enum CodingKeys: String, CodingKey {
         case accessToken = "access_token"
         case refreshToken = "refresh_token"
         case expiresAt = "expires_at"
+        case expiresIn = "expires_in"
+        case scope
+        case tokenType = "token_type"
+    }
+
+    init(
+        accessToken: String,
+        refreshToken: String,
+        expiresAt: TimeInterval?,
+        expiresIn: TimeInterval?,
+        scope: String,
+        tokenType: String
+    ) {
+        self.accessToken = accessToken
+        self.refreshToken = refreshToken
+        self.expiresAt = expiresAt
+        self.expiresIn = expiresIn
+        self.scope = scope
+        self.tokenType = tokenType
     }
 
     init(from decoder: Decoder) throws {
@@ -523,5 +795,17 @@ private struct KimiCodeOAuthCredential: Decodable {
         } else {
             expiresAt = nil
         }
+
+        if let value = try? container.decode(Double.self, forKey: .expiresIn) {
+            expiresIn = value
+        } else if let value = try? container.decode(Int64.self, forKey: .expiresIn) {
+            expiresIn = TimeInterval(value)
+        } else if let value = try? container.decode(String.self, forKey: .expiresIn) {
+            expiresIn = TimeInterval(value)
+        } else {
+            expiresIn = nil
+        }
+        scope = (try? container.decode(String.self, forKey: .scope)) ?? ""
+        tokenType = (try? container.decode(String.self, forKey: .tokenType)) ?? "Bearer"
     }
 }

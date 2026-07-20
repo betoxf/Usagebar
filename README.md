@@ -1,7 +1,7 @@
 <div align="center">
   <img src="assets/brand/usagebar-logo.png" alt="Usagebar" width="760">
 
-  <p><strong>Claude, Codex, and KimiCode usage limits, directly in your macOS menu bar.</strong></p>
+  <p><strong>Claude, Codex, KimiCode, and XAI usage limits, directly in your macOS menu bar.</strong></p>
   <p>A private, native utility for checking rolling and weekly limits without breaking focus.</p>
 
   <p>
@@ -31,7 +31,7 @@ Usage limits matter most while you are working. Usagebar keeps the current five-
 
 | Capability | What it gives you |
 | --- | --- |
-| Multiple providers | Track Claude, Codex, KimiCode, Cursor, and z.ai from one status item. |
+| Multiple providers | Track Claude, Codex, KimiCode, Cursor, z.ai, and XAI (Grok Build) from one status item. |
 | At-a-glance limits | See rolling-window and weekly percentages without opening a browser. |
 | Native controls | Refresh, change display mode, switch provider cadence, and launch at login. |
 | Local credential discovery | Reuse supported Claude CLI and Codex CLI sessions already present on the Mac. |

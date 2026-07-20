@@ -33,6 +33,11 @@ final class UsageViewModel: ObservableObject {
     @Published var zaiUsageData: ZaiUsageData = .placeholder
     @Published var zaiError: String?
 
+    // MARK: - XAI / Grok Build Published Properties
+
+    @Published var xaiUsageData: XaiUsageData = .placeholder
+    @Published var xaiError: String?
+
     // MARK: - Kimi Published Properties
 
     @Published var kimiUsageData: KimiUsageData = .placeholder
@@ -55,6 +60,7 @@ final class UsageViewModel: ObservableObject {
     @AppStorage("showCodex") var showCodex: Bool = true
     @AppStorage("showCursor") var showCursor: Bool = true
     @AppStorage("showZai") var showZai: Bool = true
+    @AppStorage("showXai") var showXai: Bool = true
     @AppStorage("showKimi") var showKimi: Bool = true
     @AppStorage("animationInterval") var animationInterval: Double = 8.0
     @AppStorage("followActiveApp") var followActiveApp: Bool = true
@@ -136,8 +142,9 @@ final class UsageViewModel: ObservableObject {
         async let codexResult: Void = refreshCodex()
         async let cursorResult: Void = refreshCursor()
         async let zaiResult: Void = refreshZai()
+        async let xaiResult: Void = refreshXai()
         async let kimiResult: Void = refreshKimi()
-        _ = await (claudeResult, codexResult, cursorResult, zaiResult, kimiResult)
+        _ = await (claudeResult, codexResult, cursorResult, zaiResult, xaiResult, kimiResult)
 
         lastUpdated = Date()
         isLoading = false
@@ -149,6 +156,7 @@ final class UsageViewModel: ObservableObject {
         CodexAPIService.shared.clearCache()
         CursorAPIService.shared.clearCache()
         ZaiAPIService.shared.clearCache()
+        XaiAPIService.shared.clearCache()
         KimiAPIService.shared.clearCache()
         detectCredentials()
 
@@ -239,6 +247,24 @@ final class UsageViewModel: ObservableObject {
         }
     }
 
+    private func refreshXai() async {
+        guard hasXaiCredentials else {
+            xaiError = nil
+            return
+        }
+
+        do {
+            xaiUsageData = try await XaiAPIService.shared.fetchUsage()
+            xaiError = nil
+        } catch let apiError as APIError {
+            xaiError = apiError.errorDescription
+            print("XAI Error: \(apiError.errorDescription ?? "Unknown")")
+        } catch {
+            xaiError = error.localizedDescription
+            print("XAI Error: \(error)")
+        }
+    }
+
     private func refreshKimi() async {
         guard hasKimiCredentials else {
             kimiError = nil
@@ -300,7 +326,7 @@ final class UsageViewModel: ObservableObject {
     // MARK: - Credentials
 
     var hasCredentials: Bool {
-        hasClaudeCredentials || hasCodexCredentials || hasCursorCredentials || hasZaiCredentials || hasKimiCredentials
+        hasClaudeCredentials || hasCodexCredentials || hasCursorCredentials || hasZaiCredentials || hasXaiCredentials || hasKimiCredentials
     }
 
     var hasClaudeCredentials: Bool {
@@ -319,6 +345,10 @@ final class UsageViewModel: ObservableObject {
         ZaiAPIService.shared.hasCredentials
     }
 
+    var hasXaiCredentials: Bool {
+        XaiAPIService.shared.hasCredentials
+    }
+
     var hasKimiCredentials: Bool {
         KimiAPIService.shared.hasCredentials
     }
@@ -334,6 +364,7 @@ final class UsageViewModel: ObservableObject {
         if showCodex && hasCodexCredentials { count += 1 }
         if showCursor && hasCursorCredentials { count += 1 }
         if showZai && hasZaiCredentials { count += 1 }
+        if showXai && hasXaiCredentials { count += 1 }
         if showKimi && hasKimiCredentials { count += 1 }
         return count
     }

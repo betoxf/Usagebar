@@ -8,6 +8,7 @@
 //
 
 import Foundation
+import Security
 
 // MARK: - Zai Usage Data Model
 
@@ -83,6 +84,12 @@ final class ZaiAPIService {
             }
         }
 
+        // GUI launches do not inherit shell-only env exports. Read the same
+        // Keychain items the user's shell loads via `load_keychain_env`.
+        if let keychainKey = keychainAPIKey() {
+            return keychainKey
+        }
+
         let home = FileManager.default.homeDirectoryForCurrentUser
         let candidates = [
             home.appendingPathComponent(".zai/config.json"),
@@ -99,8 +106,81 @@ final class ZaiAPIService {
                     return value
                 }
             }
+
+            // Nested provider config variants: { "providers": { "zai": { "apiKey": "..." } } }
+            if let providers = json["providers"] as? [String: Any] {
+                for providerKey in ["zai", "z.ai", "zhipu"] {
+                    if let provider = providers[providerKey] as? [String: Any] {
+                        for key in ["apiKey", "api_key", "token"] {
+                            if let value = (provider[key] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                               !value.isEmpty {
+                                return value
+                            }
+                        }
+                    }
+                }
+            }
+            if let providers = json["providers"] as? [[String: Any]] {
+                for provider in providers {
+                    let id = ((provider["id"] as? String) ?? "").lowercased()
+                    guard id == "zai" || id == "z.ai" || id == "zhipu" else { continue }
+                    for key in ["apiKey", "api_key", "token"] {
+                        if let value = (provider[key] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                           !value.isEmpty {
+                            return value
+                        }
+                    }
+                }
+            }
         }
         return nil
+    }
+
+    /// Reads common local Keychain service names for the z.ai API key.
+    private func keychainAPIKey() -> String? {
+        let services = [
+            "user.z-ai-api-key",
+            "openclaw.zai-api-key",
+            "Z_AI_API_KEY",
+            "ZAI_API_KEY"
+        ]
+        let accounts = [
+            NSUserName(),
+            NSFullUserName(),
+            ProcessInfo.processInfo.environment["USER"] ?? "",
+            ""
+        ]
+
+        for service in services {
+            for account in accounts {
+                if let value = readKeychainPassword(service: service, account: account),
+                   !value.isEmpty {
+                    return value
+                }
+            }
+        }
+        return nil
+    }
+
+    private func readKeychainPassword(service: String, account: String) -> String? {
+        var query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        if !account.isEmpty {
+            query[kSecAttrAccount as String] = account
+        }
+
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        guard status == errSecSuccess, let data = item as? Data else {
+            return nil
+        }
+        let value = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return (value?.isEmpty == false) ? value : nil
     }
 
     // MARK: - Fetch Usage

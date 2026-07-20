@@ -32,6 +32,8 @@ flowchart LR
 | `ClaudeOAuthService` | Discovers Claude CLI credentials, refreshes OAuth tokens, and fetches usage. |
 | `CodexAPIService` | Discovers Codex credentials, resolves the base URL, refreshes OAuth, and normalizes usage. |
 | `KimiAPIService` | Discovers Kimi Code CLI credentials, selects API or web-token authentication, and normalizes weekly plus five-hour usage. |
+| `ZaiAPIService` | Discovers a z.ai API key from the environment, Keychain, or local config files and normalizes quota windows. |
+| `XaiAPIService` | Discovers Grok Build credentials from `~/.grok/auth.json`, refreshes OIDC tokens, and normalizes weekly Grok Build credits. |
 | `CredentialStorage` | Encrypts Usagebar-managed Claude browser-session data and optional Kimi credentials locally. |
 
 ## Runtime data flow
@@ -66,6 +68,9 @@ Kimi priority mirrors CodexBar: a saved or `KIMI_CODE_API_KEY` API key, a Kimi C
 | Kimi Code OAuth refresh | `https://auth.kimi.com/api/oauth/token` |
 | Kimi web-token usage fallback | `https://www.kimi.com/apiv2/kimi.gateway.billing.v1.BillingService/GetUsages` |
 | Update discovery | `https://api.github.com/repos/betoxf/Usagebar/releases/latest` |
+| z.ai quota | `https://api.z.ai/api/monitor/usage/quota/limit` |
+| XAI / Grok Build billing | `https://cli-chat-proxy.grok.com/v1/billing?format=credits` |
+| XAI OIDC refresh | `https://auth.x.ai/oauth2/token` |
 
 A configured Codex base URL changes the Codex usage destination. Provider-private endpoints or payloads can change independently.
 

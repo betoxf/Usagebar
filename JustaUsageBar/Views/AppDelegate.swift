@@ -461,7 +461,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 menu.addItem(codexHeader)
 
                 if hasCodex {
-                    let primaryLabel = codex.primaryWindowLabel
+                    let primaryLabel = codex.primaryIsWeekly ? "7d" : codex.primaryWindowLabel
                     let primary = codex.primaryUsedPercent
                     let primaryReset = codex.timeUntilPrimaryReset
 

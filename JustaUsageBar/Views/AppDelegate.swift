@@ -37,7 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Provider switching state
     private var currentProvider: DisplayProvider = .claude
     private var providerSwitchTimer: Timer?
-    /// Provider forced by the frontmost app (Claude/ChatGPT/Codex), nil when
+    /// Provider forced by the frontmost app (Claude/ChatGPT/Codex/ZCode), nil when
     /// no matching app is active.
     private var focusProvider: DisplayProvider?
 
@@ -141,6 +141,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if bundleId.contains("kimi") || bundleId.hasPrefix("com.moonshot.") || name == "kimi" {
             return .kimi
+        }
+        if bundleId == "dev.zcode.app" || name == "zcode" {
+            return .zai
         }
         // Grok / xAI apps and Terminal sessions named around Grok Build.
         if bundleId.contains("xai") || bundleId.contains("x.ai") || name == "grok" || name.contains("grok") {
@@ -659,7 +662,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     let followItem = NSMenuItem(title: "Follow Active App", action: #selector(toggleFollowActiveApp), keyEquivalent: "")
                     followItem.target = self
                     followItem.state = viewModel.followActiveApp ? .on : .off
-                    followItem.toolTip = "Show a provider's usage when its app (Claude, ChatGPT/Codex, Cursor, KimiCode, or Grok) is in front"
+                    followItem.toolTip = "Show a provider's usage when its app (Claude, ChatGPT/Codex, Cursor, KimiCode, ZCode, or Grok) is in front"
                     displayMenu.addItem(followItem)
 
                     let intervalMenu = NSMenu()

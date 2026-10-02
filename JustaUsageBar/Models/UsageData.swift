@@ -7,22 +7,22 @@ import Foundation
 
 // MARK: - API Response Models
 
-struct UsageResponse: Codable {
+nonisolated struct UsageResponse: Codable {
     let dailyUsage: DailyUsage?
     let messageLimit: MessageLimit?
 
-    enum CodingKeys: String, CodingKey {
+    nonisolated enum CodingKeys: String, CodingKey {
         case dailyUsage = "daily_usage"
         case messageLimit = "message_limit"
     }
 }
 
-struct DailyUsage: Codable {
+nonisolated struct DailyUsage: Codable {
     let used: Int
     let limit: Int
     let resetAt: String?
 
-    enum CodingKeys: String, CodingKey {
+    nonisolated enum CodingKeys: String, CodingKey {
         case used
         case limit
         case resetAt = "reset_at"
@@ -34,14 +34,14 @@ struct DailyUsage: Codable {
     }
 }
 
-struct MessageLimit: Codable {
+nonisolated struct MessageLimit: Codable {
     let remaining: Int?
     let type: String?
 }
 
 // MARK: - App Models
 
-struct UsageData {
+nonisolated struct UsageData {
     // 5-hour window
     var fiveHourUsed: Int = 0
     var fiveHourLimit: Int = 100

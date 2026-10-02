@@ -6,20 +6,8 @@
 import SwiftUI
 import AppKit
 
-enum DisplayProvider: String, CaseIterable {
-    case claude
-    case codex
-    case cursor
-    case kimi
-    case zai
-    case xai
-
-    /// Fixed left-to-right order used for cycling and menu layout.
-    static let displayOrder: [DisplayProvider] = [.claude, .codex, .cursor, .kimi, .zai, .xai]
-}
-
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     nonisolated private static let lastLaunchedAppDescriptorDefaultsKey = "lastLaunchedAppDescriptor"
     nonisolated private static let lastUpdateCheckAtDefaultsKey = "lastUpdateCheckAt"
     nonisolated private static let lastInstalledUpdateAtDefaultsKey = "lastInstalledUpdateAt"
@@ -29,15 +17,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var statusItem: NSStatusItem!
     private var menu: NSMenu!
-    private var viewModel = UsageViewModel.shared
+    private var isMenuOpen = false
+    private var lastRenderKey: StatusRenderKey?
+    private var cachedStatusImages: [DisplayProvider: (StatusRenderKey, NSImage, CGFloat)] = [:]
+
+    private struct StatusRenderKey: Equatable {
+        let provider: DisplayProvider
+        let primary: Int
+        let secondary: Int?
+        let windowLabel: String
+        let showIcon: Bool
+        let only5h: Bool
+        let onlyWeekly: Bool
+        let dark: Bool
+        let scale: CGFloat
+        let updateBadge: Bool
+    }
+    private let viewModel: UsageViewModel
+
+    override convenience init() {
+        self.init(viewModel: .shared)
+    }
+
+    init(viewModel: UsageViewModel) {
+        self.viewModel = viewModel
+        super.init()
+    }
     private var lastStatusLength: CGFloat = 0
     private var credentialsWindow: NSWindow?
     private let preferredProviderDefaultsKey = "preferredDisplayProvider"
 
     // Provider switching state
     private var currentProvider: DisplayProvider = .claude
-    private var providerSwitchTimer: Timer?
-    /// Provider forced by the frontmost app (Claude/ChatGPT/Codex), nil when
+    private let providerSwitchTimer = RepeatingTimer()
+    private var rotationSignature = ""
+    /// Provider forced by the frontmost app (Claude/ChatGPT/Codex/ZCode), nil when
     /// no matching app is active.
     private var focusProvider: DisplayProvider?
 
@@ -62,10 +76,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.accessory)
         presentPendingUpdateFailureIfNeeded()
 
+        if viewModel.followActiveApp, let frontmost = NSWorkspace.shared.frontmostApplication {
+            focusProvider = provider(matching: frontmost)
+        }
         if viewModel.hasCredentials {
-            if viewModel.followActiveApp, let frontmost = NSWorkspace.shared.frontmostApplication {
-                focusProvider = provider(matching: frontmost)
-            }
             syncCurrentProvider(preferSavedSelection: true, persistPreference: true)
             restartProviderAnimation()
         } else {
@@ -92,6 +106,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self,
             selector: #selector(usageDataChanged),
             name: NSNotification.Name("UsageDataChanged"),
+            object: nil
+        )
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(backgroundActivityChanged),
+            name: NSNotification.Name("BackgroundActivityChanged"),
             object: nil
         )
 
@@ -142,6 +163,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if bundleId.contains("kimi") || bundleId.hasPrefix("com.moonshot.") || name == "kimi" {
             return .kimi
         }
+        if bundleId == "dev.zcode.app" || name == "zcode" {
+            return .zai
+        }
         // Grok / xAI apps and Terminal sessions named around Grok Build.
         if bundleId.contains("xai") || bundleId.contains("x.ai") || name == "grok" || name.contains("grok") {
             return .xai
@@ -155,11 +179,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    @objc private func backgroundActivityChanged() {
+        restartProviderAnimation()
+    }
+
     @objc private func settingsChanged() {
+        viewModel.providerSettingsChanged()
         if viewModel.hasCredentials {
             syncCurrentProvider()
             restartProviderAnimation()
-            updateStatusImage()
         } else {
             showSetupStatus()
         }
@@ -169,6 +197,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func usageDataChanged() {
         if viewModel.hasCredentials {
             syncCurrentProvider()
+            if currentRotationSignature != rotationSignature { restartProviderAnimation() }
             updateStatusImage()
         } else {
             showSetupStatus()
@@ -237,6 +266,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showSetupStatus() {
         stopProviderAnimation()
+        lastRenderKey = nil
         guard let button = statusItem.button else { return }
 
         let width: CGFloat = 50
@@ -281,6 +311,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         image.unlockFocus()
         image.isTemplate = false
 
+        lastStatusLength = width
         statusItem.length = width
         button.image = image
         button.toolTip = nil
@@ -288,11 +319,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func setupMenu() {
         menu = NSMenu()
-        rebuildMenu()
+        menu.delegate = self
         // Don't set statusItem.menu - we handle clicks manually
     }
 
+    func menuWillOpen(_ menu: NSMenu) {
+        guard !isMenuOpen else { return }
+        isMenuOpen = true
+        rebuildMenu()
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        isMenuOpen = false
+    }
+
     private func rebuildMenu() {
+        // Countdown labels are recomputed on open. Closed menus need no work.
+        guard isMenuOpen else { return }
         menu.removeAllItems()
 
         let hasClaude = viewModel.hasClaudeCredentials
@@ -587,6 +630,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             refreshItem.target = self
             menu.addItem(refreshItem)
 
+            let updatesMenu = NSMenu()
+            for provider in DisplayProvider.displayOrder where viewModel.refreshTargets.contains(provider) {
+                let title: String = switch provider {
+                case .claude: "Claude"
+                case .codex: "Codex"
+                case .cursor: "Cursor"
+                case .kimi: "KimiCode"
+                case .zai: "z.ai"
+                case .xai: "XAI"
+                }
+                let item = NSMenuItem(title: "\(title): \(viewModel.freshnessText(for: provider))", action: nil, keyEquivalent: "")
+                item.isEnabled = false
+                updatesMenu.addItem(item)
+            }
+            let updatesItem = NSMenuItem(title: "Last Updates", action: nil, keyEquivalent: "")
+            updatesItem.submenu = updatesMenu
+            menu.addItem(updatesItem)
+
             // Display submenu
             let displayMenu = NSMenu()
 
@@ -659,7 +720,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     let followItem = NSMenuItem(title: "Follow Active App", action: #selector(toggleFollowActiveApp), keyEquivalent: "")
                     followItem.target = self
                     followItem.state = viewModel.followActiveApp ? .on : .off
-                    followItem.toolTip = "Show a provider's usage when its app (Claude, ChatGPT/Codex, Cursor, KimiCode, or Grok) is in front"
+                    followItem.toolTip = "Show a provider's usage when its app (Claude, ChatGPT/Codex, Cursor, KimiCode, ZCode, or Grok) is in front"
                     displayMenu.addItem(followItem)
 
                     let intervalMenu = NSMenu()
@@ -770,14 +831,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Menu Actions
 
+    private func showMenu() {
+        // Populate before asking AppKit to open it, including the first empty menu.
+        isMenuOpen = true
+        rebuildMenu()
+        statusItem.menu = menu
+        defer {
+            statusItem.menu = nil
+            isMenuOpen = false
+        }
+        statusItem.button?.performClick(nil)
+    }
+
     @objc private func statusBarButtonClicked() {
         let event = NSApp.currentEvent
 
         // Right click shows menu
         if event?.type == .rightMouseUp {
-            statusItem.menu = menu
-            statusItem.button?.performClick(nil)
-            statusItem.menu = nil
+            showMenu()
             return
         }
 
@@ -793,9 +864,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 restartProviderAnimation()
             } else {
                 // If only one provider, show menu
-                statusItem.menu = menu
-                statusItem.button?.performClick(nil)
-                statusItem.menu = nil
+                showMenu()
             }
         }
     }
@@ -936,11 +1005,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func toggleFollowActiveApp() {
         viewModel.followActiveApp.toggle()
-        if !viewModel.followActiveApp {
-            focusProvider = nil
-            syncCurrentProvider(preferSavedSelection: true)
-            restartProviderAnimation()
-        }
+        focusProvider = viewModel.followActiveApp
+            ? NSWorkspace.shared.frontmostApplication.flatMap { provider(matching: $0) }
+            : nil
+        syncCurrentProvider(preferSavedSelection: true)
+        restartProviderAnimation()
         rebuildMenu()
     }
 
@@ -1634,6 +1703,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func setCurrentProvider(_ provider: DisplayProvider, persistPreference: Bool = true) {
         currentProvider = provider
+        viewModel.displayedProviderChanged(provider)
 
         if persistPreference {
             preferredProvider = provider
@@ -1656,9 +1726,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setCurrentProvider(resolvedProvider, persistPreference: persistPreference)
     }
 
+    private var currentRotationSignature: String {
+        [String(viewModel.shouldAnimateProviders), String(viewModel.animationInterval),
+         viewModel.followActiveApp ? (focusProvider?.rawValue ?? "none") : "manual",
+         displayableProviders().map(\.rawValue).joined(separator: ",")].joined(separator: "|")
+    }
+
     private func startProviderAnimation() {
         stopProviderAnimation()
         syncCurrentProvider()
+        rotationSignature = currentRotationSignature
 
         guard viewModel.shouldAnimateProviders else {
             return
@@ -1669,21 +1746,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        providerSwitchTimer = Timer.scheduledTimer(withTimeInterval: viewModel.animationInterval, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                guard let nextProvider = self.providerAfter(self.currentProvider) else { return }
-                self.setCurrentProvider(nextProvider, persistPreference: false)
-                self.updateStatusImage()
-            }
+        providerSwitchTimer.start(every: viewModel.animationInterval) { [weak self] in
+            guard let self, let nextProvider = self.providerAfter(self.currentProvider) else { return }
+            self.setCurrentProvider(nextProvider, persistPreference: false)
+            self.updateStatusImage()
         }
-        // Let the system coalesce timer wakeups to save energy.
-        providerSwitchTimer?.tolerance = viewModel.animationInterval * 0.1
     }
 
     private func stopProviderAnimation() {
-        providerSwitchTimer?.invalidate()
-        providerSwitchTimer = nil
+        providerSwitchTimer.stop()
+        rotationSignature = ""
     }
 
     private func restartProviderAnimation() {
@@ -1700,7 +1772,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let button = statusItem.button else { return }
         syncCurrentProvider()
 
-        let (image, width) = createProviderImage(for: currentProvider)
+        guard !viewModel.isBackgroundSuspended else { return }
+        let key = statusRenderKey()
+        guard key != lastRenderKey else { return }
+        let image: NSImage
+        let width: CGFloat
+        if let (cachedKey, cachedImage, cachedWidth) = cachedStatusImages[currentProvider], cachedKey == key {
+            image = cachedImage
+            width = cachedWidth
+        } else {
+            (image, width) = createProviderImage(for: currentProvider)
+            cachedStatusImages[currentProvider] = (key, image, width)
+        }
+        lastRenderKey = key
 
         if lastStatusLength != width {
             lastStatusLength = width
@@ -1709,6 +1793,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         button.image = image
         button.toolTip = nil
+    }
+
+    private func statusRenderKey() -> StatusRenderKey {
+        let primary: Int
+        let secondary: Int?
+        let label: String
+        switch currentProvider {
+        case .claude:
+            primary = viewModel.usageData.fiveHourUsed
+            secondary = viewModel.usageData.weeklyUsed
+            label = "5h"
+        case .codex:
+            primary = viewModel.codexUsageData.primaryUsedPercent
+            secondary = viewModel.codexUsageData.primaryIsWeekly ? nil : viewModel.codexUsageData.secondaryUsedPercent
+            label = viewModel.codexUsageData.primaryWindowLabel
+        case .cursor:
+            primary = viewModel.cursorUsageData.usedPercent
+            secondary = nil
+            label = "M"
+        case .kimi:
+            primary = viewModel.kimiUsageData.weeklyUsedPercent
+            secondary = viewModel.kimiUsageData.fiveHourUsedPercent
+            label = "7d"
+        case .zai:
+            primary = viewModel.zaiUsageData.usedPercent
+            secondary = nil
+            label = viewModel.zaiUsageData.windowLabel
+        case .xai:
+            primary = viewModel.xaiUsageData.primaryUsedPercent
+            secondary = nil
+            label = viewModel.xaiUsageData.primaryWindowLabel
+        }
+        return StatusRenderKey(
+            provider: currentProvider, primary: primary, secondary: secondary, windowLabel: label,
+            showIcon: viewModel.showIcon, only5h: viewModel.showOnly5hr, onlyWeekly: viewModel.showOnlyWeekly,
+            dark: getDarkMode(), scale: statusItem.button?.window?.backingScaleFactor ?? 2,
+            updateBadge: availableUpdateVersion != nil
+        )
     }
 
     private func createProviderImage(for provider: DisplayProvider) -> (NSImage, CGFloat) {
@@ -2409,6 +2531,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 struct CredentialsView: View {
     let onSave: (String, String) -> Void
+    @ObservedObject private var viewModel = UsageViewModel.shared
 
     @State private var showManualEntry = false
     @State private var sessionKey = ""
@@ -2430,7 +2553,7 @@ struct CredentialsView: View {
 
             // Auto-detected status
             VStack(spacing: 8) {
-                if ClaudeOAuthService.shared.hasCredentials {
+                if viewModel.hasClaudeCredentials {
                     HStack {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundColor(.green)
@@ -2441,7 +2564,7 @@ struct CredentialsView: View {
                     .padding(.horizontal)
                 }
 
-                if CodexAPIService.shared.hasCredentials {
+                if viewModel.hasCodexCredentials {
                     HStack {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundColor(.green)
@@ -2453,9 +2576,9 @@ struct CredentialsView: View {
                 }
             }
 
-            if ClaudeOAuthService.shared.hasCredentials || CodexAPIService.shared.hasCredentials {
+            if viewModel.hasClaudeCredentials || viewModel.hasCodexCredentials {
                 VStack(spacing: 10) {
-                    if ClaudeOAuthService.shared.hasCredentials {
+                    if viewModel.hasClaudeCredentials {
                         Button(action: {
                             onSave("__oauth__", "__oauth__")
                         }) {
@@ -2470,7 +2593,7 @@ struct CredentialsView: View {
                         .tint(anthropicOrange)
                     }
 
-                    if CodexAPIService.shared.hasCredentials {
+                    if viewModel.hasCodexCredentials {
                         Button(action: {
                             onSave("__detected_codex__", "__detected_codex__")
                         }) {

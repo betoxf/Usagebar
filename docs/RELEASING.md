@@ -4,12 +4,13 @@ Releases should start from a clean, validated `main` branch.
 
 ## 1. Prepare the version
 
-Update `MARKETING_VERSION` and the monotonically increasing `CURRENT_PROJECT_VERSION` in the Xcode project. Confirm the planned version is newer than the latest GitHub release.
+Update `MARKETING_VERSION` and the monotonically increasing `CURRENT_PROJECT_VERSION` in the Xcode project. Confirm the planned version is newer than the latest GitHub release. Add the user-visible changes to `CHANGELOG.md` and curated release notes to `docs/releases/vX.Y.Z.md`. Use Xcode 26 or newer.
 
 ## 2. Validate locally
 
 ```bash
-./script/build_and_run.sh --verify
+./script/test_performance.sh
+USAGEBAR_BUILD_CONFIGURATION=Release USAGEBAR_DISABLE_AUTO_UPDATE=1 ./script/build_and_run.sh --verify
 make release
 ```
 
@@ -22,7 +23,7 @@ git tag -a vX.Y.Z -m "Usagebar X.Y.Z"
 git push origin vX.Y.Z
 ```
 
-The `Release` workflow builds `Usagebar.zip`, creates the GitHub release, and generates release notes.
+The `Release` workflow runs regression tests, builds a universal Apple silicon/Intel `Usagebar.zip`, verifies the version/tag and signature integrity, and publishes the matching curated notes. The current distribution uses ad hoc signing and is not notarized.
 
 ## 4. Verify the published artifact
 
@@ -34,7 +35,7 @@ shasum -a 256 Usagebar.zip
 
 ## 5. Update Homebrew
 
-Update `version` and `sha256` in `Casks/usagebar.rb`. Keep `cask_renames.json` in the Homebrew tap so existing `justausagebar` installs migrate to the canonical `usagebar` token. Use the hash of the artifact downloaded from GitHub, not a separately built local archive.
+Update `version` and `sha256` in `Casks/usagebar.rb` in both this repository and `betoxf/homebrew-tap`. Keep `cask_renames.json` in the Homebrew tap so existing `justausagebar` installs migrate to the canonical `usagebar` token. Use the hash of the artifact downloaded from GitHub, not a separately built local archive.
 
 Verify `brew upgrade --cask usagebar`, then confirm all of the following:
 

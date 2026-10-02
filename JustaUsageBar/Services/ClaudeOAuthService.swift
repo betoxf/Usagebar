@@ -8,6 +8,7 @@
 import Foundation
 import Security
 
+@ProviderActor
 final class ClaudeOAuthService {
     static let shared = ClaudeOAuthService()
 
@@ -23,7 +24,7 @@ final class ClaudeOAuthService {
     private var lastCredentialCheck: Date?
     private let cacheTTL: TimeInterval = 300 // 5 minutes
 
-    struct OAuthCredentials {
+    nonisolated struct OAuthCredentials {
         var accessToken: String
         var refreshToken: String?
         var expiresAt: Date?
@@ -35,15 +36,12 @@ final class ClaudeOAuthService {
     // MARK: - Credential Discovery
 
     func loadCredentials(forceReload: Bool = false) -> OAuthCredentials? {
-        // Serve the short-lived cache only while it holds a still-valid token.
-        // A cached-but-expired token must trigger a re-read, because Claude Code
-        // may have rotated in a fresh one since we last looked.
-        if !forceReload,
-           let lastCheck = lastCredentialCheck,
-           Date().timeIntervalSince(lastCheck) < cacheTTL,
-           let cached = cachedCredentials,
-           !isExpired(cached) {
-            return cached
+        // Cache valid tokens for five minutes. Recheck absent or expired tokens
+        // after thirty seconds so Claude Code can supply a newly rotated token.
+        let ttl = cachedCredentials.map { isExpired($0) ? 30 : cacheTTL } ?? 30
+        if !forceReload, let lastCheck = lastCredentialCheck,
+           Date().timeIntervalSince(lastCheck) < ttl {
+            return cachedCredentials
         }
 
         // Use the FRESHEST source (latest expiry), rather than first-wins.
@@ -211,18 +209,17 @@ final class ClaudeOAuthService {
         process.standardError = stderrPipe
         process.standardInput = nil
 
+        let finished = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in finished.signal() }
         do {
             try process.run()
         } catch {
             return nil
         }
 
-        let deadline = Date().addingTimeInterval(securityCLIReadTimeout)
-        while process.isRunning, Date() < deadline {
-            Thread.sleep(forTimeInterval: 0.02)
-        }
-
-        if process.isRunning {
+        // This bounded wait runs on ProviderActor, never on the UI actor.
+        // A termination notification avoids waking every 20 milliseconds.
+        if finished.wait(timeout: .now() + securityCLIReadTimeout) == .timedOut {
             process.terminate()
             return nil
         }
@@ -266,9 +263,11 @@ final class ClaudeOAuthService {
                 do {
                     creds = try await refreshAccessToken(refreshToken: refreshToken)
                     cache(credentials: creds, persist: true)
-                } catch APIError.rateLimited {
+                } catch let rateLimitError as APIError where rateLimitError.isRateLimited {
                     // Temporary throttle: keep the mirror, try again next tick.
-                    throw APIError.rateLimited
+                    throw rateLimitError
+                } catch let error where isRequestCancelled(error) {
+                    throw CancellationError()
                 } catch {
                     // The persisted mirror can hold a dead refresh token while the
                     // Claude CLI keychain/file has a fresh one. Drop the mirror and
@@ -307,7 +306,7 @@ final class ClaudeOAuthService {
         case 200:
             return try parseOAuthUsageResponse(data)
         case 429:
-            throw APIError.rateLimited
+            throw APIError.rateLimited(retryAfter: HTTPRetryAfter.date(from: httpResponse))
         case 400, 401, 403:
             // Try refresh once
             if let refreshToken = creds.refreshToken {
@@ -318,14 +317,19 @@ final class ClaudeOAuthService {
                     var retryRequest = request
                     retryRequest.setValue("Bearer \(newCreds.accessToken)", forHTTPHeaderField: "Authorization")
                     let (retryData, retryResponse) = try await URLSession.shared.data(for: retryRequest)
+                    if let http = retryResponse as? HTTPURLResponse, http.statusCode == 429 {
+                        throw APIError.rateLimited(retryAfter: HTTPRetryAfter.date(from: http))
+                    }
                     guard let retryHttp = retryResponse as? HTTPURLResponse, retryHttp.statusCode == 200 else {
                         clearPersistedCredentials()
                         throw APIError.unauthorized
                     }
                     return try parseOAuthUsageResponse(retryData)
-                } catch APIError.rateLimited {
+                } catch let rateLimitError as APIError where rateLimitError.isRateLimited {
                     // Temporary throttle: keep credentials, try again next tick.
-                    throw APIError.rateLimited
+                    throw rateLimitError
+                } catch let error where isRequestCancelled(error) {
+                    throw CancellationError()
                 } catch {
                     clearPersistedCredentials()
                     throw APIError.unauthorized
@@ -367,7 +371,7 @@ final class ClaudeOAuthService {
             throw APIError.unknown(0)
         }
         if httpResponse.statusCode == 429 {
-            throw APIError.rateLimited
+            throw APIError.rateLimited(retryAfter: HTTPRetryAfter.date(from: httpResponse))
         }
         guard httpResponse.statusCode == 200 else {
             throw APIError.unauthorized

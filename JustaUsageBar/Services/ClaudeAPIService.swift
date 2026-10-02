@@ -5,14 +5,24 @@
 
 import Foundation
 
-enum APIError: Error, LocalizedError {
+nonisolated enum APIError: Error, LocalizedError {
     case noCredentials
     case invalidURL
     case unauthorized
-    case rateLimited
+    case rateLimited(retryAfter: Date?)
     case networkError(Error)
     case decodingError(Error)
     case unknown(Int)
+
+    var isRateLimited: Bool {
+        if case .rateLimited = self { return true }
+        return false
+    }
+
+    var retryAfter: Date? {
+        if case .rateLimited(let date) = self { return date }
+        return nil
+    }
 
     var errorDescription: String? {
         switch self {
@@ -23,7 +33,7 @@ enum APIError: Error, LocalizedError {
         case .unauthorized:
             return "Session expired - please sign in again"
         case .rateLimited:
-            return "Claude usage could not be verified right now - use with caution"
+            return "Usage is temporarily rate limited — showing the last available reading"
         case .networkError(let error):
             return "Network error: \(error.localizedDescription)"
         case .decodingError(let error):
@@ -34,12 +44,13 @@ enum APIError: Error, LocalizedError {
     }
 }
 
-enum ClaudeAuthSource: String {
+nonisolated enum ClaudeAuthSource: String {
     case none
     case oauth
     case webSession
 }
 
+@ProviderActor
 final class ClaudeAPIService {
     static let shared = ClaudeAPIService()
 
@@ -67,6 +78,10 @@ final class ClaudeAPIService {
                 let data = try await ClaudeOAuthService.shared.fetchUsage()
                 lastAuthSource = .oauth
                 return data
+            } catch let error as APIError where error.isRateLimited {
+                throw error
+            } catch let error where isRequestCancelled(error) {
+                throw CancellationError()
             } catch let error as APIError {
                 lastError = error
             }
@@ -134,6 +149,8 @@ final class ClaudeAPIService {
             switch httpResponse.statusCode {
             case 200:
                 return try parseUsageResponse(data)
+            case 429:
+                throw APIError.rateLimited(retryAfter: HTTPRetryAfter.date(from: httpResponse))
             case 401, 403:
                 throw APIError.unauthorized
             default:
@@ -209,4 +226,13 @@ final class ClaudeAPIService {
         }
         return nil
     }
+}
+
+nonisolated func isRequestCancelled(_ error: Error) -> Bool {
+    if error is CancellationError { return true }
+    if let error = error as? URLError { return error.code == .cancelled }
+    if let error = error as? APIError, case .networkError(let underlying) = error {
+        return isRequestCancelled(underlying)
+    }
+    return false
 }

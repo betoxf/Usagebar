@@ -104,9 +104,9 @@ struct SettingsView: View {
         }
         .padding(12)
         .frame(width: 160)
-        .onAppear {
-            sessionKey = CredentialStorage.shared.sessionKey ?? ""
-            organizationId = CredentialStorage.shared.organizationId ?? ""
+        .task {
+            sessionKey = await CredentialStorage.shared.sessionKey ?? ""
+            organizationId = await CredentialStorage.shared.organizationId ?? ""
         }
         .sheet(isPresented: $showingAuthWindow) {
             AuthWindowView { sk, org in

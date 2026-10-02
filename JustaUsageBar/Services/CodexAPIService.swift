@@ -9,7 +9,7 @@ import Foundation
 
 // MARK: - Codex Usage Data Model
 
-struct CodexUsageData {
+nonisolated struct CodexUsageData {
     var planType: String = "unknown"
     var primaryUsedPercent: Int = 0
     var primaryResetAt: Date?
@@ -61,13 +61,14 @@ struct CodexUsageData {
 
 // MARK: - Codex API Service
 
+@ProviderActor
 final class CodexAPIService {
     static let shared = CodexAPIService()
 
     private let oauthClientId = "app_EMoamEEZ73f0CkXaXp7hrann"
     private let tokenEndpoint = "https://auth.openai.com/oauth/token"
 
-    struct CodexCredentials {
+    nonisolated struct CodexCredentials {
         var accessToken: String
         var refreshToken: String?
         var accountId: String?
@@ -193,6 +194,8 @@ final class CodexAPIService {
         switch httpResponse.statusCode {
         case 200:
             return try parseCodexUsageResponse(data)
+        case 429:
+            throw APIError.rateLimited(retryAfter: HTTPRetryAfter.date(from: httpResponse))
         case 401, 403:
             if let refreshToken = creds.refreshToken, !creds.isApiKey {
                 do {
@@ -201,11 +204,18 @@ final class CodexAPIService {
                     var retryRequest = request
                     retryRequest.setValue("Bearer \(newCreds.accessToken)", forHTTPHeaderField: "Authorization")
                     let (retryData, retryResponse) = try await URLSession.shared.data(for: retryRequest)
+                    if let http = retryResponse as? HTTPURLResponse, http.statusCode == 429 {
+                        throw APIError.rateLimited(retryAfter: HTTPRetryAfter.date(from: http))
+                    }
                     guard let retryHttp = retryResponse as? HTTPURLResponse, retryHttp.statusCode == 200 else {
                         clearCache()
                         throw APIError.unauthorized
                     }
                     return try parseCodexUsageResponse(retryData)
+                } catch let error as APIError where error.isRateLimited {
+                    throw error
+                } catch let error where isRequestCancelled(error) {
+                    throw CancellationError()
                 } catch {
                     clearCache()
                     throw APIError.unauthorized
@@ -239,6 +249,9 @@ final class CodexAPIService {
 
         let (data, response) = try await URLSession.shared.data(for: request)
 
+        if let http = response as? HTTPURLResponse, http.statusCode == 429 {
+            throw APIError.rateLimited(retryAfter: HTTPRetryAfter.date(from: http))
+        }
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
             throw APIError.unauthorized
         }

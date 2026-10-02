@@ -11,11 +11,17 @@ permissions:
 jobs:
   build:
     runs-on: macos-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
       - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode.app
+        run: |
+          sudo xcode-select -s /Applications/Xcode.app
+          xcodebuild -version
+
+      - name: Run performance and rendering regression tests
+        run: ./script/test_performance.sh
 
       - name: Build Release
         run: |
@@ -23,6 +29,8 @@ jobs:
             -scheme JustaUsageBar \
             -configuration Release \
             -derivedDataPath build/DerivedData \
+            -destination 'generic/platform=macOS' \
+            ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO CODE_SIGN_IDENTITY=- \
             build
 
       - name: Verify install and update safeguards
@@ -30,12 +38,16 @@ jobs:
           app="build/DerivedData/Build/Products/Release/Usagebar.app"
           test "$(/usr/libexec/PlistBuddy -c 'Print :LSMultipleInstancesProhibited' "$app/Contents/Info.plist")" = "true"
           test -f "$app/Contents/Resources/install_update_and_relaunch.sh"
+          test "v$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = "$GITHUB_REF_NAME"
+          test -f "docs/releases/$GITHUB_REF_NAME.md"
+          lipo -verify_arch arm64 x86_64 "$app/Contents/MacOS/Usagebar"
+          codesign --verify --deep --strict "$app"
 
       - name: Create zip
         run: |
           mkdir -p build/Release
           cp -R build/DerivedData/Build/Products/Release/Usagebar.app build/Release/
-          cd build/Release && zip -r ../../Usagebar.zip Usagebar.app
+          cd build/Release && COPYFILE_DISABLE=1 zip -r -X ../../Usagebar.zip Usagebar.app
 
       - name: Get SHA256
         id: sha
@@ -44,7 +56,9 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
+          name: Usagebar ${{ github.ref_name }}
           files: Usagebar.zip
-          generate_release_notes: true
+          body_path: docs/releases/${{ github.ref_name }}.md
+          fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -5,8 +5,9 @@ MODE="${1:-run}"
 APP_NAME="Usagebar"
 BUNDLE_ID="bullfigherstudios.JustaUsageBar"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DERIVED_DATA="$ROOT_DIR/build/CodexDerivedData"
-APP_BUNDLE="$DERIVED_DATA/Build/Products/Debug/$APP_NAME.app"
+BUILD_CONFIGURATION="${USAGEBAR_BUILD_CONFIGURATION:-Debug}"
+DERIVED_DATA="${USAGEBAR_DERIVED_DATA:-$ROOT_DIR/build/CodexDerivedData}"
+APP_BUNDLE="$DERIVED_DATA/Build/Products/$BUILD_CONFIGURATION/$APP_NAME.app"
 APP_EXECUTABLE="$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 
 if [[ -z "${DEVELOPER_DIR:-}" ]]; then
@@ -19,11 +20,17 @@ fi
 
 build_app() {
   xcodebuild -project "$ROOT_DIR/JustaUsageBar.xcodeproj" -scheme JustaUsageBar \
-    -configuration Debug -derivedDataPath "$DERIVED_DATA" \
+    -configuration "$BUILD_CONFIGURATION" -derivedDataPath "$DERIVED_DATA" \
     CODE_SIGNING_ALLOWED=NO -quiet build
 }
 
-launch_app() { /usr/bin/open -n "$APP_BUNDLE"; }
+launch_app() {
+  if [[ "${USAGEBAR_DISABLE_AUTO_UPDATE:-0}" == "1" ]]; then
+    /usr/bin/open -n "$APP_BUNDLE" --args -autoUpdate NO
+  else
+    /usr/bin/open -n "$APP_BUNDLE"
+  fi
+}
 
 pkill -x "$APP_NAME" >/dev/null 2>&1 || true
 build_app

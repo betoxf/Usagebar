@@ -23,6 +23,8 @@ release:
 		-scheme $(SCHEME) \
 		-configuration Release \
 		-derivedDataPath $(DERIVED_DATA_DIR) \
+		-destination 'generic/platform=macOS' \
+		ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO CODE_SIGN_IDENTITY=- \
 		-quiet \
 		build
 	@cd $(dir $(BUILT_APP_PATH)) && COPYFILE_DISABLE=1 zip -r -X $(abspath $(ZIP_PATH)) $(RELEASE_APP_NAME).app

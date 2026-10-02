@@ -11,7 +11,7 @@ import Foundation
 
 // MARK: - XAI Usage Data Model
 
-struct XaiUsageData {
+nonisolated struct XaiUsageData {
     /// Subscription tier label when present (for example "X Premium").
     var planName: String = "unknown"
     /// Grok Build product usage for the current weekly credits window.
@@ -56,6 +56,7 @@ struct XaiUsageData {
 
 // MARK: - XAI API Service
 
+@ProviderActor
 final class XaiAPIService {
     static let shared = XaiAPIService()
 
@@ -199,12 +200,12 @@ final class XaiAPIService {
             case 401, 403:
                 throw APIError.unauthorized
             case 429:
-                throw APIError.rateLimited
+                throw APIError.rateLimited(retryAfter: HTTPRetryAfter.date(from: retryHTTP))
             default:
                 throw APIError.unknown(retryHTTP.statusCode)
             }
         case 429:
-            throw APIError.rateLimited
+            throw APIError.rateLimited(retryAfter: HTTPRetryAfter.date(from: httpResponse))
         default:
             throw APIError.unknown(httpResponse.statusCode)
         }
@@ -257,6 +258,9 @@ final class XaiAPIService {
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw APIError.unknown(0)
+        }
+        if httpResponse.statusCode == 429 {
+            throw APIError.rateLimited(retryAfter: HTTPRetryAfter.date(from: httpResponse))
         }
         guard httpResponse.statusCode == 200 else {
             if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
@@ -457,7 +461,7 @@ final class XaiAPIService {
 
 // MARK: - Credential Model
 
-private struct XaiAuthCredential {
+nonisolated private struct XaiAuthCredential {
     let storageKey: String
     let accessToken: String
     let refreshToken: String?

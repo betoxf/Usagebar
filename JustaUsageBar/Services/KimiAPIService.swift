@@ -8,7 +8,7 @@
 
 import Foundation
 
-enum KimiAuthSource: String {
+nonisolated enum KimiAuthSource: String {
     case none
     case apiKey
     case cli
@@ -28,7 +28,7 @@ enum KimiAuthSource: String {
     }
 }
 
-struct KimiUsageData {
+nonisolated struct KimiUsageData {
     var weeklyUsedPercent: Int = 0
     var weeklyResetAt: Date?
     var fiveHourUsedPercent: Int?
@@ -61,14 +61,19 @@ struct KimiUsageData {
     static let placeholder = KimiUsageData()
 }
 
-enum KimiServiceError: LocalizedError {
+nonisolated enum KimiServiceError: LocalizedError {
     case noCredentials
     case expiredCLICredential
     case refreshInProgress
     case unauthorized
-    case rateLimited
+    case rateLimited(retryAfter: Date?)
     case invalidResponse
     case httpStatus(Int)
+
+    var retryAfter: Date? {
+        if case .rateLimited(let date) = self { return date }
+        return nil
+    }
 
     var errorDescription: String? {
         switch self {
@@ -90,6 +95,7 @@ enum KimiServiceError: LocalizedError {
     }
 }
 
+@ProviderActor
 final class KimiAPIService {
     static let shared = KimiAPIService()
 
@@ -99,6 +105,8 @@ final class KimiAPIService {
         string: "https://www.kimi.com/apiv2/kimi.gateway.billing.v1.BillingService/GetUsages"
     )!
     private let session: URLSession
+    private var cachedCLICredential: KimiCodeOAuthCredential??
+    private var lastCLICredentialCheck: Date?
 
     private static let cliOAuthClientID = "17e5f671-d194-4dfb-9706-5516cb48c098"
     private static let cliRefreshLockWaitNanoseconds: UInt64 = 100_000_000
@@ -126,7 +134,7 @@ final class KimiAPIService {
             return true
         }
 
-        guard let credential = loadCLICredential() else { return false }
+        guard let credential = loadCLICredential(forceReload: false) else { return false }
         return normalized(credential.accessToken) != nil || normalized(credential.refreshToken) != nil
     }
 
@@ -142,7 +150,7 @@ final class KimiAPIService {
         if normalized(environment["KIMI_CODE_API_KEY"]) != nil {
             return .apiKey
         }
-        if let credential = loadCLICredential(),
+        if let credential = loadCLICredential(forceReload: false),
            normalized(credential.accessToken) != nil || normalized(credential.refreshToken) != nil {
             return .cli
         }
@@ -155,6 +163,8 @@ final class KimiAPIService {
 
     func clearCache() {
         lastAuthSource = .none
+        cachedCLICredential = nil
+        lastCLICredentialCheck = nil
     }
 
     func fetchUsage() async throws -> KimiUsageData {
@@ -186,6 +196,11 @@ final class KimiAPIService {
                 throw CancellationError()
             } catch let error as URLError where error.code == .cancelled {
                 throw CancellationError()
+            } catch let error where isRequestCancelled(error) {
+                throw CancellationError()
+            } catch let error as KimiServiceError {
+                if case .rateLimited = error { throw error }
+                lastError = error
             } catch {
                 lastError = error
             }
@@ -199,7 +214,7 @@ final class KimiAPIService {
 
     // MARK: - Credential discovery
 
-    private enum CredentialCandidate {
+    nonisolated private enum CredentialCandidate {
         case codeAPI(String, KimiAuthSource)
         case cliOAuth(KimiCodeOAuthCredential)
         case web(String)
@@ -259,9 +274,18 @@ final class KimiAPIService {
         return !isCLIAccessTokenFresh(credential)
     }
 
-    private func loadCLICredential() -> KimiCodeOAuthCredential? {
-        guard let data = try? Data(contentsOf: cliCredentialURL) else { return nil }
-        return try? JSONDecoder().decode(KimiCodeOAuthCredential.self, from: data)
+    private func loadCLICredential(forceReload: Bool = true) -> KimiCodeOAuthCredential? {
+        if !forceReload, let lastCLICredentialCheck,
+           Date().timeIntervalSince(lastCLICredentialCheck) < 30,
+           let cachedCLICredential {
+            return cachedCLICredential
+        }
+        let credential = (try? Data(contentsOf: cliCredentialURL)).flatMap {
+            try? JSONDecoder().decode(KimiCodeOAuthCredential.self, from: $0)
+        }
+        cachedCLICredential = .some(credential)
+        lastCLICredentialCheck = Date()
+        return credential
     }
 
     private func fetchCLIUsage(credential: KimiCodeOAuthCredential) async throws -> KimiUsageData {
@@ -429,7 +453,7 @@ final class KimiAPIService {
         case 401, 403:
             throw KimiServiceError.expiredCLICredential
         case 429:
-            throw KimiServiceError.rateLimited
+            throw KimiServiceError.rateLimited(retryAfter: HTTPRetryAfter.date(from: httpResponse))
         default:
             throw KimiServiceError.httpStatus(httpResponse.statusCode)
         }
@@ -592,7 +616,7 @@ final class KimiAPIService {
             case 401, 403:
                 throw KimiServiceError.unauthorized
             case 429:
-                throw KimiServiceError.rateLimited
+                throw KimiServiceError.rateLimited(retryAfter: HTTPRetryAfter.date(from: response))
             default:
                 throw KimiServiceError.httpStatus(response.statusCode)
             }
@@ -666,7 +690,7 @@ final class KimiAPIService {
 
     // MARK: - Parsing
 
-    private struct UsageDetail {
+    nonisolated private struct UsageDetail {
         let limit: Double
         let used: Double
         let resetAt: Date?
@@ -743,7 +767,7 @@ final class KimiAPIService {
     }
 }
 
-private struct KimiCodeOAuthCredential: Decodable {
+nonisolated private struct KimiCodeOAuthCredential: Decodable {
     let accessToken: String
     let refreshToken: String
     let expiresAt: TimeInterval?
@@ -756,7 +780,7 @@ private struct KimiCodeOAuthCredential: Decodable {
             !refreshToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    private enum CodingKeys: String, CodingKey {
+    nonisolated private enum CodingKeys: String, CodingKey {
         case accessToken = "access_token"
         case refreshToken = "refresh_token"
         case expiresAt = "expires_at"

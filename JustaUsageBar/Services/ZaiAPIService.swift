@@ -12,7 +12,7 @@ import Security
 
 // MARK: - Zai Usage Data Model
 
-struct ZaiUsageData {
+nonisolated struct ZaiUsageData {
     var planName: String = "unknown"
     var usedPercent: Int = 0
     var resetAt: Date?
@@ -39,6 +39,7 @@ struct ZaiUsageData {
 
 // MARK: - Zai API Service
 
+@ProviderActor
 final class ZaiAPIService {
     static let shared = ZaiAPIService()
 
@@ -209,7 +210,7 @@ final class ZaiAPIService {
         case 401, 403:
             throw APIError.unauthorized
         case 429:
-            throw APIError.rateLimited
+            throw APIError.rateLimited(retryAfter: HTTPRetryAfter.date(from: httpResponse))
         default:
             throw APIError.unknown(httpResponse.statusCode)
         }

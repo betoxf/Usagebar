@@ -15,6 +15,7 @@
   <p>
     <a href="#installation">Install</a> ·
     <a href="#how-it-works">How it works</a> ·
+    <a href="CHANGELOG.md">Changelog</a> ·
     <a href="docs/ARCHITECTURE.md">Architecture</a> ·
     <a href="CONTRIBUTING.md">Contributing</a> ·
     <a href="SECURITY.md">Security</a>
@@ -33,6 +34,7 @@ Usage limits matter most while you are working. Usagebar keeps the current five-
 | --- | --- |
 | Multiple providers | Track Claude, Codex, KimiCode, Cursor, z.ai, and XAI (Grok Build) from one status item. |
 | At-a-glance limits | See rolling-window and weekly percentages without opening a browser. |
+| Focus-aware switching | Automatically show z.ai usage when ZCode is the active app, alongside the existing provider app mappings. |
 | Native controls | Refresh, change display mode, switch provider cadence, and launch at login. |
 | Local credential discovery | Reuse supported Claude CLI and Codex CLI sessions already present on the Mac. |
 | Privacy-first operation | No Usagebar account, telemetry, analytics, or intermediary backend. |
@@ -112,9 +114,9 @@ Bartender or Ice.)
 
 | Control | Behavior |
 | --- | --- |
-| Refresh (`⌘R`) | Fetch the latest available limits immediately. |
+| Refresh (`⌘R`) | Rediscover credentials and fetch enabled providers, subject to server retry deadlines. |
 | Display mode | Show both windows, the five-hour window only, or the weekly window only. |
-| Provider visibility | Choose which detected providers appear and rotate. |
+| Provider visibility | Choose which detected providers appear, rotate, and refresh in the background. |
 | Switch cadence | Rotate providers automatically or switch manually with a left click. |
 | Launch at Login | Register or remove Usagebar as a macOS login item. |
 | Sign out | Reset the selected provider's Usagebar state; provider CLI sessions remain provider-owned. |
@@ -129,7 +131,9 @@ Codex CLI auth.json ─────┼─> local credential discovery ─> provi
 Kimi Code credentials ───┘
 ```
 
-The app refreshes in the background every two minutes by default. OAuth access tokens are refreshed when supported by the provider session. See [Architecture](docs/ARCHITECTURE.md) for component boundaries, credential priority, and network destinations.
+The app refreshes visible providers every two minutes by default, or every five minutes in Low Power Mode. Hidden providers stop polling and refresh when re-enabled. Background requests and automatic provider rotation pause while the display or Mac sleeps; stale usage refreshes on wake. Failed providers retry less frequently, respect server cooldowns, and keep the last successful reading. **Last Updates** in the menu shows how fresh each provider's data is.
+
+Credential discovery runs off the UI thread. Menu-bar rendering uses cached availability and reuses unchanged images; menus update when opened. OAuth access tokens are refreshed when supported by the provider session. See [Architecture](docs/ARCHITECTURE.md) for component boundaries, credential priority, and network destinations.
 
 ## Privacy and security
 
@@ -143,7 +147,7 @@ Report suspected vulnerabilities privately according to the [security policy](SE
 
 ## Build from source
 
-You need Xcode 15 or newer with the macOS 14 SDK.
+You need Xcode 26 or newer with its bundled macOS SDK.
 
 ```bash
 git clone https://github.com/betoxf/Usagebar.git

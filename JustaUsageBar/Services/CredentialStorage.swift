@@ -8,20 +8,21 @@
 import Foundation
 import CryptoKit
 
+@ProviderActor
 final class CredentialStorage {
     static let shared = CredentialStorage()
 
     private let fileName = "credentials.enc"
     private var cachedCredentials: Credentials?
 
-    struct Credentials: Codable {
+    nonisolated struct Credentials: Codable {
         var sessionKey: String?
         var organizationId: String?
         var claudeOAuth: ClaudeOAuthCredentials?
         var kimiCredential: String?
     }
 
-    struct ClaudeOAuthCredentials: Codable {
+    nonisolated struct ClaudeOAuthCredentials: Codable, Equatable {
         var accessToken: String
         var refreshToken: String?
         var expiresAt: Date?
@@ -63,6 +64,7 @@ final class CredentialStorage {
     var claudeOAuthCredentials: ClaudeOAuthCredentials? {
         get { cachedCredentials?.claudeOAuth }
         set {
+            guard cachedCredentials?.claudeOAuth != newValue else { return }
             if cachedCredentials == nil {
                 cachedCredentials = Credentials()
             }
@@ -80,6 +82,17 @@ final class CredentialStorage {
             cachedCredentials?.kimiCredential = newValue
             removeEmptyCredentialFileOrSave()
         }
+    }
+
+    func setWebSession(sessionKey: String, organizationId: String) {
+        if cachedCredentials == nil { cachedCredentials = Credentials() }
+        cachedCredentials?.sessionKey = sessionKey
+        cachedCredentials?.organizationId = organizationId
+        saveCredentials()
+    }
+
+    func setKimiCredential(_ value: String) {
+        kimiCredential = value
     }
 
     func clearClaudeCredentials() {
@@ -164,7 +177,7 @@ final class CredentialStorage {
 
     // MARK: - Encryption (AES-GCM with device-specific key)
 
-    private var encryptionKey: SymmetricKey {
+    private lazy var encryptionKey: SymmetricKey = {
         // Generate a deterministic key based on machine-specific info
         // This ensures only this machine can decrypt the credentials
         let machineId = getMachineIdentifier()
@@ -174,7 +187,7 @@ final class CredentialStorage {
         // Use SHA256 to derive a 256-bit key
         let hash = SHA256.hash(data: Data(keyMaterial.utf8))
         return SymmetricKey(data: hash)
-    }
+    }()
 
     private func getMachineIdentifier() -> String {
         // Use hardware UUID as machine identifier

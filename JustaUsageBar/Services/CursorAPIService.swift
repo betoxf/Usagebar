@@ -12,7 +12,7 @@ import SQLite3
 
 // MARK: - Cursor Usage Data Model
 
-struct CursorUsageData {
+nonisolated struct CursorUsageData {
     var planName: String = "unknown"
     var usedPercent: Int = 0
     var resetAt: Date?
@@ -40,6 +40,7 @@ struct CursorUsageData {
 
 // MARK: - Cursor API Service
 
+@ProviderActor
 final class CursorAPIService {
     static let shared = CursorAPIService()
 
@@ -49,7 +50,7 @@ final class CursorAPIService {
     private var lastTokenCheck: Date?
     private let tokenCacheTTL: TimeInterval = 300
 
-    private struct CursorToken {
+    nonisolated private struct CursorToken {
         let userID: String
         let accessToken: String
         let expiresAt: Date?
@@ -81,9 +82,9 @@ final class CursorAPIService {
     }
 
     private func loadToken() -> CursorToken? {
+        let ttl = cachedToken == nil ? 30 : tokenCacheTTL
         if let lastCheck = lastTokenCheck,
-           Date().timeIntervalSince(lastCheck) < tokenCacheTTL,
-           let cachedToken {
+           Date().timeIntervalSince(lastCheck) < ttl {
             return cachedToken
         }
 
@@ -91,6 +92,8 @@ final class CursorAPIService {
               !accessToken.isEmpty,
               let claims = decodeJWTClaims(accessToken),
               let sub = claims["sub"] as? String else {
+            cachedToken = nil
+            lastTokenCheck = Date()
             return nil
         }
 
@@ -198,7 +201,7 @@ final class CursorAPIService {
             clearCache()
             throw APIError.unauthorized
         case 429:
-            throw APIError.rateLimited
+            throw APIError.rateLimited(retryAfter: HTTPRetryAfter.date(from: httpResponse))
         default:
             throw APIError.unknown(httpResponse.statusCode)
         }
@@ -276,7 +279,7 @@ final class CursorAPIService {
 
 private extension CharacterSet {
     /// Percent-encode the cookie value but keep JWT-safe characters intact.
-    static let cursorCookieAllowed: CharacterSet = {
+    nonisolated static let cursorCookieAllowed: CharacterSet = {
         var set = CharacterSet.alphanumerics
         set.insert(charactersIn: "-._~")
         return set

@@ -21,7 +21,9 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
       - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode.app
+        run: |
+          sudo xcode-select -s /Applications/Xcode.app
+          xcodebuild -version
       - name: Build
         run: |
           xcodebuild \
@@ -39,3 +41,5 @@ jobs:
           test ! -e Casks/justausagebar.rb
           ruby -c Casks/usagebar.rb
           ruby -rjson -e 'abort unless JSON.parse(File.read("cask_renames.json")) == {"justausagebar" => "usagebar"}'
+      - name: Run performance and rendering regression tests
+        run: ./script/test_performance.sh

@@ -27,7 +27,9 @@ flowchart LR
 | --- | --- |
 | `JustaUsageBarApp` | SwiftUI entry point and settings scene. |
 | `AppDelegate` | Creates the `NSStatusItem`, menus, provider images, switching, and release checks. |
-| `UsageViewModel` | Usage state, display preferences, credential availability, refresh orchestration, and launch at login. |
+| `UsageViewModel` | UI state, cached credential availability, per-provider refresh scheduling, power-state handling, and launch at login. |
+| `ProviderActor` | Serializes provider and credential storage work away from the UI actor. |
+| `UsageRefreshPolicy` | Provider selection, refresh cadence, retry deadlines, and Retry-After parsing. |
 | `ClaudeAPIService` | Selects Claude authentication mode and normalizes responses. |
 | `ClaudeOAuthService` | Discovers Claude CLI credentials, refreshes OAuth tokens, and fetches usage. |
 | `CodexAPIService` | Discovers Codex credentials, resolves the base URL, refreshes OAuth, and normalizes usage. |
@@ -38,14 +40,20 @@ flowchart LR
 
 ## Runtime data flow
 
-1. `UsageViewModel` discovers available credentials during initialization.
-2. With at least one provider, it starts an immediate refresh and a two-minute timer.
-3. Available providers refresh concurrently.
-4. Services validate responses and normalize payloads.
-5. The view model publishes state and posts `UsageDataChanged`.
-6. `AppDelegate` redraws the status item and rebuilds the menu.
+1. `UsageViewModel` discovers provider availability asynchronously on `ProviderActor` and publishes an in-memory snapshot for UI decisions.
+2. Enabled providers refresh concurrently on launch. If every display switch is off, only the displayed authenticated fallback refreshes.
+3. One owned refresh task and one one-shot timer schedule the next due work. The normal interval is two minutes; Low Power Mode raises it to at least five minutes. Timers have 10% tolerance.
+4. Each provider tracks its last attempt, last successful update, and retry deadline. Failures back off from the normal interval up to 30 minutes. HTTP `Retry-After` deadlines are honored even for manual refreshes. A success clears the failure delay.
+5. Display or system sleep cancels pending requests and stops timers. Cancellation preserves credentials and previous readings. Wake refreshes only stale providers. Low Power Mode also pauses optional provider rotation.
+6. A provider re-enabled in Display refreshes immediately unless a server cooldown is still active. Manual Refresh bypasses local delay and rediscovers credentials.
+7. `AppDelegate` uses normalized usage and the credential snapshot to select a provider. It keeps at most one rendered image per provider, keyed by displayed values, appearance, backing scale, update badge, and display settings. Identical images are not reassigned.
+8. The menu is built when it opens, so reset countdowns and per-provider Last Updates labels are current without a UI timer. An open menu updates when usage or settings change.
 
-UI state is main-actor isolated. Network requests use `URLSession` and do not pass through a Usagebar service.
+UI state and drawing remain main-actor isolated. Provider services and encrypted credential storage share `ProviderActor`, a separate serial executor. Network awaits permit requests to overlap while keeping credential mutation serialized. No provider service is called by a drawing or provider-availability getter.
+
+Claude and Cursor cache absent credentials briefly; Kimi caches credential discovery for 30 seconds but always rereads during usage fetches and inside its OAuth refresh lock. Explicit Refresh clears discovery caches. An unchanged Claude OAuth mirror is not rewritten, and the existing device-derived encryption key is reused in memory.
+
+The browser login view owns a cancellable repeating timer. Dismantling the view stops polling, cancels scheduled extraction, stops navigation, and ignores late callbacks.
 
 ## Credential discovery
 

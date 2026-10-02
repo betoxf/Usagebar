@@ -11,7 +11,7 @@ Thank you for helping improve Usagebar. The project favors small, reviewable cha
 
 ## Development setup
 
-Requirements: macOS 14+, Xcode 15+ with the macOS 14 SDK, and Git.
+Requirements: Xcode 26+, the bundled macOS SDK, and Git. The app targets macOS 14+.
 
 ```bash
 git clone https://github.com/betoxf/Usagebar.git
@@ -22,6 +22,16 @@ cd Usagebar
 The script stops an existing Usagebar process, builds a Debug app into `build/CodexDerivedData`, launches the fresh bundle, and verifies the process. It also supports `--debug`, `--logs`, and `--telemetry`.
 
 Use `make build` for a compile-only build.
+
+Run `./script/test_performance.sh` for deterministic scheduling, cancellation, credential-snapshot, timer-lifetime, menu, and image-cache regression tests. Scheduling tests use fake providers; rendering tests compile the real AppKit renderers with fixture state. Both use an isolated preferences domain and never read provider credentials or contact provider APIs. Set `USAGEBAR_RENDER_OUTPUT=/absolute/path/preview.png` to save light/dark rendering previews.
+
+For local performance measurements, use a Release build:
+
+```bash
+USAGEBAR_BUILD_CONFIGURATION=Release USAGEBAR_DISABLE_AUTO_UPDATE=1 ./script/build_and_run.sh --verify
+```
+
+`USAGEBAR_DERIVED_DATA` can place build output outside a synced folder. `USAGEBAR_DISABLE_AUTO_UPDATE=1` applies only to the launched process and keeps local test builds from starting an automatic Homebrew update. Compare the same provider settings after initial credential discovery and requests have settled.
 
 ## Project structure
 

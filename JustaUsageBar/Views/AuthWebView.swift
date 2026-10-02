@@ -215,6 +215,12 @@ struct ClaudeWebView: NSViewRepresentable {
 
     func updateNSView(_ webView: WKWebView, context: Context) {}
 
+    static func dismantleNSView(_ webView: WKWebView, coordinator: Coordinator) {
+        coordinator.stop()
+        webView.stopLoading()
+        webView.navigationDelegate = nil
+    }
+
     func makeCoordinator() -> Coordinator {
         Coordinator(onSessionExtracted: onSessionExtracted, onOrgIdOnly: onOrgIdOnly, onStatusChange: onStatusChange)
     }
@@ -226,7 +232,9 @@ struct ClaudeWebView: NSViewRepresentable {
         private var hasExtracted = false
         private var extractionAttempts = 0
         private let maxAttempts = 15  // More attempts since we redirect
-        private var checkTimer: Timer?
+        private let checkTimer = RepeatingTimer()
+        private var pendingCheck: DispatchWorkItem?
+        private var isStopped = false
         private weak var webViewRef: WKWebView?
         private var extractedOrgId: String?
         private var hasRedirectedToUsage = false
@@ -237,17 +245,39 @@ struct ClaudeWebView: NSViewRepresentable {
             self.onStatusChange = onStatusChange
         }
 
+        deinit {
+            pendingCheck?.cancel()
+        }
+
         func startPeriodicCheck(webView: WKWebView) {
+            isStopped = false
             webViewRef = webView
-            // Check every 2 seconds if user has logged in
-            checkTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            checkTimer.start(every: 2) { [weak self] in
                 self?.checkLoginState()
             }
         }
 
+        func stop() {
+            isStopped = true
+            checkTimer.stop()
+            pendingCheck?.cancel()
+            pendingCheck = nil
+            webViewRef = nil
+        }
+
+        private func scheduleCheck(after delay: TimeInterval, webView: WKWebView) {
+            pendingCheck?.cancel()
+            let work = DispatchWorkItem { [weak self, weak webView] in
+                guard let self, !self.isStopped, let webView else { return }
+                self.extractCredentials(from: webView)
+            }
+            pendingCheck = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+        }
+
         private func checkLoginState() {
-            guard let webView = webViewRef, !hasExtracted else {
-                checkTimer?.invalidate()
+            guard !isStopped, let webView = webViewRef, !hasExtracted else {
+                checkTimer.stop()
                 return
             }
 
@@ -261,13 +291,13 @@ struct ClaudeWebView: NSViewRepresentable {
                 !urlString.contains("/verify")
 
             if isLoggedInPage {
-                print("Periodic check: Detected logged-in page: \(urlString)")
 
                 // Redirect to settings/usage page if not already there - cookies are fully set there
                 if !hasRedirectedToUsage && !urlString.contains("/settings/usage") {
                     hasRedirectedToUsage = true
                     extractionAttempts = 0  // Reset attempts for fresh start on usage page
                     DispatchQueue.main.async {
+                        guard !self.isStopped else { return }
                         self.onStatusChange("Redirecting to usage page...")
                     }
                     if let usageURL = URL(string: "https://claude.ai/settings/usage") {
@@ -278,18 +308,18 @@ struct ClaudeWebView: NSViewRepresentable {
 
                 // We're on the usage page now, extract credentials
                 DispatchQueue.main.async {
+                    guard !self.isStopped else { return }
                     self.onStatusChange("Detected login! Extracting...")
                 }
-                checkTimer?.invalidate()
+                checkTimer.stop()
                 extractCredentials(from: webView)
             }
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            guard let url = webView.url else { return }
+            guard !isStopped, let url = webView.url else { return }
             let urlString = url.absoluteString
 
-            print("Navigation finished: \(urlString)")
 
             // Check if we're on a logged-in page (not login/signup)
             if !urlString.contains("/login") && !urlString.contains("/signup") && urlString.contains("claude.ai") {
@@ -298,6 +328,7 @@ struct ClaudeWebView: NSViewRepresentable {
                     hasRedirectedToUsage = true
                     extractionAttempts = 0  // Reset for fresh start
                     DispatchQueue.main.async {
+                        guard !self.isStopped else { return }
                         self.onStatusChange("Redirecting to usage page...")
                     }
                     if let usageURL = URL(string: "https://claude.ai/settings/usage") {
@@ -308,22 +339,21 @@ struct ClaudeWebView: NSViewRepresentable {
 
                 // User appears to be logged in on usage page - wait a moment then extract
                 DispatchQueue.main.async {
+                    guard !self.isStopped else { return }
                     self.onStatusChange("On usage page! Extracting...")
                 }
                 // Small delay to ensure page is fully loaded
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-                    self?.extractCredentials(from: webView)
-                }
+                scheduleCheck(after: 1, webView: webView)
             }
         }
 
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
             if let url = navigationAction.request.url {
-                print("Navigating to: \(url)")
 
                 // Extract org ID from URL if present
                 if url.absoluteString.contains("claude.ai") && !url.absoluteString.contains("/login") {
                     DispatchQueue.main.async {
+                        guard !self.isStopped else { return }
                         self.onStatusChange("Loading Claude...")
                     }
                 }
@@ -332,10 +362,11 @@ struct ClaudeWebView: NSViewRepresentable {
         }
 
         private func extractCredentials(from webView: WKWebView) {
-            guard !hasExtracted else { return }
+            guard !isStopped, !hasExtracted else { return }
             extractionAttempts += 1
 
             DispatchQueue.main.async {
+                guard !self.isStopped else { return }
                 self.onStatusChange("Extracting... (attempt \(self.extractionAttempts))")
             }
 
@@ -373,13 +404,11 @@ struct ClaudeWebView: NSViewRepresentable {
             """
 
             webView.evaluateJavaScript(script) { [weak self] result, error in
-                guard let self = self else { return }
+                guard let self, !self.isStopped else { return }
 
                 if let dict = result as? [String: Any] {
-                    print("JS Result: \(dict)")
 
-                    if let errorMsg = dict["error"] as? String {
-                        print("Error: \(errorMsg)")
+                    if dict["error"] is String {
                         self.retryOrFallback(webView: webView)
                         return
                     }
@@ -395,6 +424,7 @@ struct ClaudeWebView: NSViewRepresentable {
                     if !orgId.isEmpty && !sessionKey.isEmpty {
                         self.hasExtracted = true
                         DispatchQueue.main.async {
+                            guard !self.isStopped else { return }
                             self.onSessionExtracted(sessionKey, orgId)
                         }
                         return
@@ -413,19 +443,20 @@ struct ClaudeWebView: NSViewRepresentable {
             extractedOrgId = orgId  // Store for fallback
 
             webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { [weak self] cookies in
-                guard let self = self else { return }
+                guard let self, !self.isStopped else { return }
 
-                print("All cookies: \(cookies.map { "\($0.name): \($0.domain)" })")
 
                 if let sessionCookie = cookies.first(where: { $0.name == "sessionKey" }) {
                     self.hasExtracted = true
                     DispatchQueue.main.async {
+                        guard !self.isStopped else { return }
                         self.onSessionExtracted(sessionCookie.value, orgId)
                     }
                 } else {
                     // Session cookie is HttpOnly - switch to manual with org pre-filled
                     self.hasExtracted = true
                     DispatchQueue.main.async {
+                        guard !self.isStopped else { return }
                         self.onOrgIdOnly(orgId)
                     }
                 }
@@ -433,20 +464,21 @@ struct ClaudeWebView: NSViewRepresentable {
         }
 
         private func retryOrFallback(webView: WKWebView) {
+            guard !isStopped else { return }
             if extractionAttempts < maxAttempts {
                 // Wait 2.5s between retries to give page time to fully load
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
-                    self?.extractCredentials(from: webView)
-                }
+                scheduleCheck(after: 2.5, webView: webView)
             } else {
                 // If we got org ID, use that
                 if let orgId = extractedOrgId, !orgId.isEmpty {
                     hasExtracted = true
                     DispatchQueue.main.async {
+                        guard !self.isStopped else { return }
                         self.onOrgIdOnly(orgId)
                     }
                 } else {
                     DispatchQueue.main.async {
+                        guard !self.isStopped else { return }
                         self.onStatusChange("Could not extract. Use Manual entry.")
                     }
                 }
@@ -473,17 +505,16 @@ struct ClaudeWebView: NSViewRepresentable {
             """
 
             webView.evaluateJavaScript(script) { [weak self] result, error in
-                guard let self = self else { return }
+                guard let self, !self.isStopped else { return }
 
                 if let orgId = result as? String, !orgId.isEmpty {
-                    print("Found org ID: \(orgId)")
                     self.hasExtracted = true
 
                     DispatchQueue.main.async {
+                        guard !self.isStopped else { return }
                         self.onSessionExtracted(sessionKey, orgId)
                     }
                 } else {
-                    print("Could not get org ID from API, trying URL fallback")
                     // Try to extract from current URL or use fallback method
                     self.extractOrgFromURL(webView: webView, sessionKey: sessionKey)
                 }
@@ -497,7 +528,7 @@ struct ClaudeWebView: NSViewRepresentable {
 
                 // Check URL after navigation
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-                    guard let self = self, !self.hasExtracted else { return }
+                    guard let self, !self.isStopped, !self.hasExtracted else { return }
 
                     // Try the API call again
                     let script = """
@@ -512,10 +543,12 @@ struct ClaudeWebView: NSViewRepresentable {
                         if let orgId = result as? String, !orgId.isEmpty {
                             self.hasExtracted = true
                             DispatchQueue.main.async {
+                                guard !self.isStopped else { return }
                                 self.onSessionExtracted(sessionKey, orgId)
                             }
                         } else {
                             DispatchQueue.main.async {
+                                guard !self.isStopped else { return }
                                 self.onStatusChange("Could not extract org ID. Use manual entry.")
                             }
                         }

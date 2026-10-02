@@ -1,6 +1,8 @@
+# frozen_string_literal: true
+
 cask "usagebar" do
-  version "1.8.1"
-  sha256 "09fdedaddf31abd2c56c26659cfb8c8db8ef52ecee03ac13c0a2729b2fc467a4"
+  version "1.9.0"
+  sha256 "9ac44d1d394a68b00dee3d3b20f87b671b01603b1e0b36076ae2a961f1bd2ffe"
 
   url "https://github.com/betoxf/Usagebar/releases/download/v#{version}/Usagebar.zip"
   name "Usagebar"
@@ -11,7 +13,8 @@ cask "usagebar" do
 
   app "Usagebar.app"
 
-  postflight do
+  # Keep the installer compatible with Homebrew versions predating structured install steps.
+  postflight do # rubocop:disable Cask/InstallSteps
     system_command "/usr/bin/xattr",
                    args: ["-c", "#{appdir}/Usagebar.app"]
     system_command "/usr/bin/open",

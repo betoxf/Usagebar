@@ -4,16 +4,30 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Existing unpublished version tag to release (for example v1.9.0)'
+        required: true
+        type: string
 
 permissions:
   contents: write
+
+env:
+  RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
 
 jobs:
   build:
     runs-on: macos-latest
     timeout-minutes: 20
     steps:
+      - name: Validate release tag
+        run: '[[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]'
+
       - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
 
       - name: Select Xcode
         run: |
@@ -38,9 +52,12 @@ jobs:
           app="build/DerivedData/Build/Products/Release/Usagebar.app"
           test "$(/usr/libexec/PlistBuddy -c 'Print :LSMultipleInstancesProhibited' "$app/Contents/Info.plist")" = "true"
           test -f "$app/Contents/Resources/install_update_and_relaunch.sh"
-          test "v$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = "$GITHUB_REF_NAME"
-          test -f "docs/releases/$GITHUB_REF_NAME.md"
-          lipo -verify_arch arm64 x86_64 "$app/Contents/MacOS/Usagebar"
+          test "v$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = "$RELEASE_TAG"
+          test -f "docs/releases/$RELEASE_TAG.md"
+          architectures="$(xcrun lipo -archs "$app/Contents/MacOS/Usagebar")"
+          echo "Architectures: $architectures"
+          [[ " $architectures " == *" arm64 "* ]]
+          [[ " $architectures " == *" x86_64 "* ]]
           codesign --verify --deep --strict "$app"
 
       - name: Create zip
@@ -56,9 +73,10 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          name: Usagebar ${{ github.ref_name }}
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: Usagebar ${{ env.RELEASE_TAG }}
           files: Usagebar.zip
-          body_path: docs/releases/${{ github.ref_name }}.md
+          body_path: docs/releases/${{ env.RELEASE_TAG }}.md
           fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

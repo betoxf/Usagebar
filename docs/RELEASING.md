@@ -25,6 +25,14 @@ git push origin vX.Y.Z
 
 The `Release` workflow runs regression tests, builds a universal Apple silicon/Intel `Usagebar.zip`, verifies the version/tag and signature integrity, and publishes the matching curated notes. The current distribution uses ad hoc signing and is not notarized.
 
+If a workflow failure happens before the release artifact is published, fix the workflow on `main` and retry the existing tag without moving it:
+
+```bash
+gh workflow run release.yml --ref main -f release_tag=vX.Y.Z
+```
+
+The retry checks out the original tag and uses its app version and release notes. Use this only for an unpublished release; do not replace an already published artifact and invalidate its checksum.
+
 ## 4. Verify the published artifact
 
 Download the GitHub artifact, inspect it, launch it on a clean account when possible, and calculate its published hash:

@@ -177,7 +177,7 @@ final class XaiAPIService {
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("cli", forHTTPHeaderField: "x-grok-client-mode")
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await ProviderHTTP.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw APIError.unknown(0)
         }
@@ -190,7 +190,7 @@ final class XaiAPIService {
             let refreshedToken = try await usableAccessToken(forceRefresh: true)
             var retry = request
             retry.setValue("Bearer \(refreshedToken)", forHTTPHeaderField: "Authorization")
-            let (retryData, retryResponse) = try await URLSession.shared.data(for: retry)
+            let (retryData, retryResponse) = try await ProviderHTTP.data(for: retry)
             guard let retryHTTP = retryResponse as? HTTPURLResponse else {
                 throw APIError.unknown(0)
             }
@@ -255,7 +255,7 @@ final class XaiAPIService {
         ]
         request.httpBody = body.percentEncodedQuery?.data(using: .utf8)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await ProviderHTTP.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw APIError.unknown(0)
         }
@@ -308,7 +308,7 @@ final class XaiAPIService {
         }
 
         do {
-            let (data, response) = try await URLSession.shared.data(from: discoveryURL)
+            let (data, response) = try await ProviderHTTP.data(for: URLRequest(url: discoveryURL))
             if let http = response as? HTTPURLResponse, http.statusCode == 200,
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let endpoint = stringValue(json["token_endpoint"]),

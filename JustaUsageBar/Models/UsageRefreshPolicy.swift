@@ -37,6 +37,12 @@ nonisolated enum UsageRefreshPolicy {
         return lowPower ? max(300, normal) : normal
     }
 
+    /// A reading nobody can see changes nothing on screen, so it polls five
+    /// times less often until it is shown again.
+    static func interval(base: TimeInterval, visible: Bool) -> TimeInterval {
+        visible ? base : base * 5
+    }
+
     static func targets(
         available: Set<DisplayProvider>, enabled: Set<DisplayProvider>, fallback: DisplayProvider
     ) -> Set<DisplayProvider> {
@@ -45,6 +51,22 @@ nonisolated enum UsageRefreshPolicy {
         // Keep the displayed fallback fresh even with externally edited preferences.
         if available.contains(fallback) { return [fallback] }
         return DisplayProvider.displayOrder.first(where: available.contains).map { [$0] } ?? []
+    }
+}
+
+/// Provider timestamps, with or without fractional seconds. Creating a formatter
+/// costs far more than parsing, so both are built once.
+nonisolated enum ISO8601Timestamp {
+    private static let parsers: [ISO8601DateFormatter] = {
+        let withFractional = ISO8601DateFormatter()
+        withFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let basic = ISO8601DateFormatter()
+        basic.formatOptions = [.withInternetDateTime]
+        return [withFractional, basic]
+    }()
+
+    static func date(from string: String) -> Date? {
+        parsers.lazy.compactMap { $0.date(from: string) }.first
     }
 }
 

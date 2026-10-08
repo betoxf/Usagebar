@@ -104,7 +104,6 @@ final class KimiAPIService {
     private let webUsageURL = URL(
         string: "https://www.kimi.com/apiv2/kimi.gateway.billing.v1.BillingService/GetUsages"
     )!
-    private let session: URLSession
     private var cachedCLICredential: KimiCodeOAuthCredential??
     private var lastCLICredentialCheck: Date?
 
@@ -115,13 +114,7 @@ final class KimiAPIService {
 
     private(set) var lastAuthSource: KimiAuthSource = .none
 
-    private init() {
-        let configuration = URLSessionConfiguration.default
-        configuration.timeoutIntervalForRequest = 20
-        configuration.timeoutIntervalForResource = 30
-        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-        session = URLSession(configuration: configuration)
-    }
+    private init() {}
 
     var hasCredentials: Bool {
         if normalized(CredentialStorage.shared.kimiCredential) != nil {
@@ -439,7 +432,7 @@ final class KimiAPIService {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await session.data(for: request)
+            (data, response) = try await ProviderHTTP.data(for: request, timeout: 20)
         } catch {
             throw APIError.networkError(error)
         }
@@ -606,7 +599,7 @@ final class KimiAPIService {
 
     private func responseData(for request: URLRequest) async throws -> Data {
         do {
-            let (data, response) = try await session.data(for: request)
+            let (data, response) = try await ProviderHTTP.data(for: request, timeout: 20)
             guard let response = response as? HTTPURLResponse else {
                 throw KimiServiceError.invalidResponse
             }
@@ -756,14 +749,7 @@ final class KimiAPIService {
     }
 
     private func parseDate(_ value: String?) -> Date? {
-        guard let value else { return nil }
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = fractional.date(from: value) { return date }
-
-        let standard = ISO8601DateFormatter()
-        standard.formatOptions = [.withInternetDateTime]
-        return standard.date(from: value)
+        value.flatMap(ISO8601Timestamp.date)
     }
 }
 

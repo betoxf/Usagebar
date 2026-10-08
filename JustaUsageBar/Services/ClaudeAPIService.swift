@@ -55,18 +55,11 @@ final class ClaudeAPIService {
     static let shared = ClaudeAPIService()
 
     private let baseURL = "https://claude.ai/api/organizations"
-    private let session: URLSession
 
     /// Tracks which auth method was used for the last successful fetch
     private(set) var lastAuthSource: ClaudeAuthSource = .none
 
-    private init() {
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 30
-        config.timeoutIntervalForResource = 60
-        config.requestCachePolicy = .reloadIgnoringLocalCacheData
-        self.session = URLSession(configuration: config)
-    }
+    private init() {}
 
     // MARK: - Fetch Usage (OAuth first, then web session fallback)
 
@@ -140,7 +133,7 @@ final class ClaudeAPIService {
         request.setValue("sessionKey=\(sessionKey)", forHTTPHeaderField: "Cookie")
 
         do {
-            let (data, response) = try await session.data(for: request)
+            let (data, response) = try await ProviderHTTP.data(for: request, timeout: 30)
 
             guard let httpResponse = response as? HTTPURLResponse else {
                 throw APIError.unknown(0)

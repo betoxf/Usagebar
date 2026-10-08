@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Focus following
+
+- Keep the last AI tool's provider on screen when another app comes to the front. The bar no longer jumps to the provider you last clicked, so z.ai appears only after you use ZCode or a z.ai CLI.
+- Follow AI CLIs in any terminal: Claude Code, Codex, Cursor Agent, Kimi, and Grok. Claude Code pointed at the z.ai or Kimi gateway shows that provider. No new permission is needed.
+
+### Performance
+
+- Close provider connections after each refresh. Idle HTTP/2 and HTTP/3 connections kept waking the app between refreshes.
+- Stop writing cookies and cached responses to disk.
+- Refresh enabled providers that are not on screen five times less often, and immediately when they are shown or the menu opens.
+- Look for new sign-ins at that slower pace. **Refresh** still checks at once.
+
 ## [1.9.0](https://github.com/betoxf/Usagebar/releases/tag/v1.9.0) — 2026-10-02
 
 ### Performance

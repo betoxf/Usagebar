@@ -109,6 +109,9 @@ final class UsageViewModel: ObservableObject {
     private var lowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
     private var knownTargets: Set<DisplayProvider> = []
     private var displayedProvider: DisplayProvider = .claude
+    private var isMenuOpen = false
+    private var isRotating = false
+    private var lastCredentialCheck: Date?
 
     @AppStorage("hasLaunchedBefore") private var hasLaunchedBefore = false
 
@@ -128,6 +131,14 @@ final class UsageViewModel: ObservableObject {
 
     var effectiveRefreshInterval: TimeInterval {
         UsageRefreshPolicy.interval(base: refreshInterval, lowPower: lowPowerMode)
+    }
+
+    /// The menu bar shows one provider unless it rotates; the open menu shows all.
+    func refreshInterval(for provider: DisplayProvider) -> TimeInterval {
+        UsageRefreshPolicy.interval(
+            base: effectiveRefreshInterval,
+            visible: isMenuOpen || isRotating || provider == displayedProvider
+        )
     }
 
     private var enabledProviders: Set<DisplayProvider> {
@@ -167,6 +178,18 @@ final class UsageViewModel: ObservableObject {
         providerSettingsChanged()
     }
 
+    func menuVisibilityChanged(isOpen: Bool) {
+        guard isOpen != isMenuOpen else { return }
+        isMenuOpen = isOpen
+        providerSettingsChanged()
+    }
+
+    func rotationChanged(isRotating: Bool) {
+        guard isRotating != self.isRotating else { return }
+        self.isRotating = isRotating
+        providerSettingsChanged()
+    }
+
     func providerSettingsChanged() {
         let targets = refreshTargets
         let added = targets.subtracting(knownTargets)
@@ -176,7 +199,12 @@ final class UsageViewModel: ObservableObject {
             refreshStates[provider, default: .init()].lastAttempt = nil
             refreshStates[provider, default: .init()].retryAt = refreshStates[provider]?.serverRetryAt
         }
-        if !added.isEmpty {
+        // A reading that just became visible may be older than its new cadence allows.
+        let now = Date()
+        let stale = targets.contains {
+            refreshStates[$0, default: .init()].isDue(at: now, interval: refreshInterval(for: $0), manual: false)
+        }
+        if !added.isEmpty || stale {
             Task { await requestRefresh() }
         } else {
             scheduleNextRefresh()
@@ -256,6 +284,7 @@ final class UsageViewModel: ObservableObject {
         claudeAuthSource = hasClaude ? .oauth : (hasWeb ? .webSession : .none)
         kimiAuthSource = kimiSource
         knownTargets = refreshTargets
+        lastCredentialCheck = Date()
     }
 
     private func performRefresh(manual: Bool, rediscover: Bool) async {
@@ -264,11 +293,15 @@ final class UsageViewModel: ObservableObject {
             isLoading = false
             NotificationCenter.default.post(name: NSNotification.Name("UsageDataChanged"), object: nil)
         }
-        await detectCredentials(forceReload: rediscover)
+        // Sign-ins are rare, so look for them at the hidden cadence unless asked.
+        let checkInterval = UsageRefreshPolicy.interval(base: effectiveRefreshInterval, visible: false)
+        if manual || lastCredentialCheck.map({ Date().timeIntervalSince($0) >= checkInterval }) ?? true {
+            await detectCredentials(forceReload: rediscover)
+        }
         guard !Task.isCancelled, !isBackgroundSuspended else { return }
         let now = Date()
         let due = refreshTargets.filter {
-            refreshStates[$0, default: .init()].isDue(at: now, interval: effectiveRefreshInterval, manual: manual)
+            refreshStates[$0, default: .init()].isDue(at: now, interval: refreshInterval(for: $0), manual: manual)
         }
         for provider in due { refreshStates[provider, default: .init()].lastAttempt = now }
         await withTaskGroup(of: Void.self) { group in
@@ -348,7 +381,7 @@ final class UsageViewModel: ObservableObject {
         timer?.invalidate()
         timer = nil
         guard autoRefreshEnabled, !isBackgroundSuspended, refreshTask == nil else { return }
-        guard let next = refreshTargets.map({ refreshStates[$0, default: .init()].nextRefresh(interval: effectiveRefreshInterval) }).min()
+        guard let next = refreshTargets.map({ refreshStates[$0, default: .init()].nextRefresh(interval: refreshInterval(for: $0)) }).min()
         else { return }
         let delay = max(1, next.timeIntervalSinceNow)
         timer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in

@@ -90,6 +90,38 @@ extension AppDelegate {
         viewModel.codexUsageData.primaryWindowSeconds = 7 * 24 * 3600
         updateStatusImage()
         precondition(statusItem.button?.image?.size.width == 50, "Weekly Codex window duplicated")
+
+        // Follow Active App keeps the last AI tool on screen instead of the saved pick.
+        viewModel.followActiveApp = true
+        viewModel.animationInterval = 0
+        preferredProvider = .codex
+        setFocus(.claude)
+        precondition(currentProvider == .claude, "AI app in front was not shown")
+        follow(.current)
+        precondition(focusProvider == nil && currentProvider == .claude, "Leaving an AI app changed the provider")
+
+        // A CLI in the frontmost app's terminal is followed, here in this test's own.
+        guard let cli = TerminalStandIn(named: "codex") else { preconditionFailure("No pseudo-terminal available") }
+        defer { cli.stop() }
+        for _ in 0..<200 where TerminalAgentDetector.scan(app: getpid(), isTerminal: false).provider != .codex {
+            cli.type()
+            usleep(10_000)
+        }
+        follow(.current)
+        for _ in 0..<100 where focusProvider != .codex {
+            cli.type()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        }
+        precondition(focusProvider == .codex && currentProvider == .codex, "Terminal CLI was not followed")
+        currentProvider = .claude
+        resumeTerminalWatch()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        precondition(currentProvider == .claude, "Resuming the watch overrode a manual pick")
+        terminalSessionChanged(to: nil)
+        precondition(focusProvider == nil && currentProvider == .claude, "A CLI that ended moved the provider")
+        viewModel.followActiveApp = false
+        follow(.current)
+        precondition(terminalWatch == nil, "Watching continued with Follow Active App off")
         if let output, let tiff = sheet.tiffRepresentation,
            let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
             try png.write(to: output)
@@ -100,15 +132,18 @@ extension AppDelegate {
 @main
 struct StatusRenderingTests {
     @MainActor static func main() throws {
+        TerminalStandIn.runIfRequested()
         guard Bundle.main.bundleIdentifier == "dev.usagebar.performance-tests" else {
             fatalError("Tests require their isolated preferences domain")
         }
+        // A run that trapped leaves its preferences behind.
+        UserDefaults.standard.removePersistentDomain(forName: "dev.usagebar.performance-tests")
         defer { UserDefaults.standard.removePersistentDomain(forName: "dev.usagebar.performance-tests") }
         _ = NSApplication.shared
         NSApp.setActivationPolicy(.prohibited)
         let model = UsageViewModel(startAutomatically: false)
         let output = ProcessInfo.processInfo.environment["USAGEBAR_RENDER_OUTPUT"].map { URL(fileURLWithPath: $0) }
         try AppDelegate(viewModel: model).verifyRendering(output: output)
-        print("PASS: setup/Claude/Codex menus, closed-menu reuse, status image caching, light/dark rendering")
+        print("PASS: setup/Claude/Codex menus, closed-menu reuse, status image caching, light/dark rendering, focus following")
     }
 }

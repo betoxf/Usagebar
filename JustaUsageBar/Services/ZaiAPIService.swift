@@ -200,7 +200,7 @@ final class ZaiAPIService {
         request.setValue("application/json", forHTTPHeaderField: "accept")
         request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await ProviderHTTP.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw APIError.unknown(0)
         }

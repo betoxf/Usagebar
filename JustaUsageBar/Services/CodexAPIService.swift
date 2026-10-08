@@ -185,7 +185,7 @@ final class CodexAPIService {
             request.setValue(accountId, forHTTPHeaderField: "ChatGPT-Account-Id")
         }
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await ProviderHTTP.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw APIError.unknown(0)
@@ -203,7 +203,7 @@ final class CodexAPIService {
                     cachedCredentials = newCreds
                     var retryRequest = request
                     retryRequest.setValue("Bearer \(newCreds.accessToken)", forHTTPHeaderField: "Authorization")
-                    let (retryData, retryResponse) = try await URLSession.shared.data(for: retryRequest)
+                    let (retryData, retryResponse) = try await ProviderHTTP.data(for: retryRequest)
                     if let http = retryResponse as? HTTPURLResponse, http.statusCode == 429 {
                         throw APIError.rateLimited(retryAfter: HTTPRetryAfter.date(from: http))
                     }
@@ -247,7 +247,7 @@ final class CodexAPIService {
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await ProviderHTTP.data(for: request)
 
         if let http = response as? HTTPURLResponse, http.statusCode == 429 {
             throw APIError.rateLimited(retryAfter: HTTPRetryAfter.date(from: http))

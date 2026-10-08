@@ -34,7 +34,7 @@ Usage limits matter most while you are working. Usagebar keeps the current five-
 | --- | --- |
 | Multiple providers | Track Claude, Codex, KimiCode, Cursor, z.ai, and XAI (Grok Build) from one status item. |
 | At-a-glance limits | See rolling-window and weekly percentages without opening a browser. |
-| Focus-aware switching | Automatically show z.ai usage when ZCode is the active app, alongside the existing provider app mappings. |
+| Focus-aware switching | Show the provider of the AI tool you used last: the Claude, ChatGPT/Codex, Cursor, KimiCode, ZCode, or Grok app, or the Claude Code, Codex, Cursor, Kimi, or Grok CLI running in your terminal. |
 | Native controls | Refresh, change display mode, switch provider cadence, and launch at login. |
 | Local credential discovery | Reuse supported Claude CLI and Codex CLI sessions already present on the Mac. |
 | Privacy-first operation | No Usagebar account, telemetry, analytics, or intermediary backend. |
@@ -131,7 +131,7 @@ Codex CLI auth.json ─────┼─> local credential discovery ─> provi
 Kimi Code credentials ───┘
 ```
 
-The app refreshes visible providers every two minutes by default, or every five minutes in Low Power Mode. Hidden providers stop polling and refresh when re-enabled. Background requests and automatic provider rotation pause while the display or Mac sleeps; stale usage refreshes on wake. Failed providers retry less frequently, respect server cooldowns, and keep the last successful reading. **Last Updates** in the menu shows how fresh each provider's data is.
+The app refreshes the provider on screen every two minutes by default, or every five minutes in Low Power Mode. Enabled providers that are not on screen refresh five times less often, and as soon as they are shown or the menu opens; new sign-ins are picked up at that slower pace or when you click **Refresh**. Hidden providers stop polling and refresh when re-enabled. No connection stays open between refreshes. Background requests and automatic provider rotation pause while the display or Mac sleeps; stale usage refreshes on wake. Failed providers retry less frequently, respect server cooldowns, and keep the last successful reading. **Last Updates** in the menu shows how fresh each provider's data is.
 
 Credential discovery runs off the UI thread. Menu-bar rendering uses cached availability and reuses unchanged images; menus update when opened. OAuth access tokens are refreshed when supported by the provider session. See [Architecture](docs/ARCHITECTURE.md) for component boundaries, credential priority, and network destinations.
 
@@ -140,6 +140,7 @@ Credential discovery runs off the UI thread. Menu-bar rendering uses cached avai
 - Usage data travels directly between your Mac and the selected provider.
 - Usagebar does not operate a backend and does not collect telemetry or analytics.
 - CLI credential files are read locally and are never copied to a Usagebar service.
+- To follow a CLI in your terminal, Usagebar reads the command line and Anthropic gateway setting of the foreground command in your terminal sessions. It keeps none of it and needs no Accessibility, Automation, or Screen Recording access.
 - Claude browser-session credentials saved by the app are encrypted locally with AES-256-GCM using a device-derived key.
 - Provider APIs and authentication formats can change independently of Usagebar.
 

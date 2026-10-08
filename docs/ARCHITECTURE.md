@@ -26,10 +26,12 @@ flowchart LR
 | Component | Responsibility |
 | --- | --- |
 | `JustaUsageBarApp` | SwiftUI entry point and settings scene. |
-| `AppDelegate` | Creates the `NSStatusItem`, menus, provider images, switching, and release checks. |
+| `AppDelegate` | Creates the `NSStatusItem`, menus, provider images, switching, focus following, and release checks. |
 | `UsageViewModel` | UI state, cached credential availability, per-provider refresh scheduling, power-state handling, and launch at login. |
 | `ProviderActor` | Serializes provider and credential storage work away from the UI actor. |
 | `UsageRefreshPolicy` | Provider selection, refresh cadence, retry deadlines, and Retry-After parsing. |
+| `ProviderHTTP` | Sends every provider and release request on a short-lived session and closes it when the last request finishes. |
+| `TerminalAgentDetector` | Reads terminal sessions from the process table to tell which AI CLI is in use. |
 | `ClaudeAPIService` | Selects Claude authentication mode and normalizes responses. |
 | `ClaudeOAuthService` | Discovers Claude CLI credentials, refreshes OAuth tokens, and fetches usage. |
 | `CodexAPIService` | Discovers Codex credentials, resolves the base URL, refreshes OAuth, and normalizes usage. |
@@ -40,9 +42,9 @@ flowchart LR
 
 ## Runtime data flow
 
-1. `UsageViewModel` discovers provider availability asynchronously on `ProviderActor` and publishes an in-memory snapshot for UI decisions.
+1. `UsageViewModel` discovers provider availability asynchronously on `ProviderActor` and publishes an in-memory snapshot for UI decisions. It repeats discovery on every manual refresh, and otherwise no more often than hidden readings refresh.
 2. Enabled providers refresh concurrently on launch. If every display switch is off, only the displayed authenticated fallback refreshes.
-3. One owned refresh task and one one-shot timer schedule the next due work. The normal interval is two minutes; Low Power Mode raises it to at least five minutes. Timers have 10% tolerance.
+3. One owned refresh task and one one-shot timer schedule the next due work. The normal interval is two minutes; Low Power Mode raises it to at least five minutes. Timers have 10% tolerance. That interval applies to readings on screen: the displayed provider, every enabled provider while they rotate, and all of them while the menu is open. Other enabled providers refresh five times less often, and immediately once they are shown.
 4. Each provider tracks its last attempt, last successful update, and retry deadline. Failures back off from the normal interval up to 30 minutes. HTTP `Retry-After` deadlines are honored even for manual refreshes. A success clears the failure delay.
 5. Display or system sleep cancels pending requests and stops timers. Cancellation preserves credentials and previous readings. Wake refreshes only stale providers. Low Power Mode also pauses optional provider rotation.
 6. A provider re-enabled in Display refreshes immediately unless a server cooldown is still active. Manual Refresh bypasses local delay and rediscovers credentials.
@@ -51,9 +53,19 @@ flowchart LR
 
 UI state and drawing remain main-actor isolated. Provider services and encrypted credential storage share `ProviderActor`, a separate serial executor. Network awaits permit requests to overlap while keeping credential mutation serialized. No provider service is called by a drawing or provider-availability getter.
 
+Requests use one ephemeral `URLSession` with no cookie storage or response cache. Requests that overlap share it, and the last one to finish invalidates it, so no HTTP/2 or HTTP/3 connection stays open between refreshes. A kept-alive connection wakes the process for keepalives and network-path updates; a new handshake per refresh costs less.
+
 Claude and Cursor cache absent credentials briefly; Kimi caches credential discovery for 30 seconds but always rereads during usage fetches and inside its OAuth refresh lock. Explicit Refresh clears discovery caches. An unchanged Claude OAuth mirror is not rewritten, and the existing device-derived encryption key is reused in memory.
 
 The browser login view owns a cancellable repeating timer. Dismantling the view stops polling, cancels scheduled extraction, stops navigation, and ignores late callbacks.
+
+## Focus following
+
+With Follow Active App on, the frontmost application selects the provider: Claude, ChatGPT or Codex, Cursor, KimiCode, ZCode (z.ai), and Grok map by bundle identifier or name. Any other application, including a terminal whose CLI has ended, leaves the last provider on screen and lets rotation resume; a manual click overrides it until the next AI app or CLI comes to the front.
+
+An application that is not mapped is checked for terminal sessions. `TerminalAgentDetector` lists pseudo-terminals by last input time, which is how `w` measures idle time, and reads the foreground processes of the most recently used session that the application hosts. A session with another application bundle among its ancestors belongs to that application; sessions under a detached server such as tmux or iTermServer count for any application that hosts a terminal. The launch path and arguments identify Claude Code, Codex, Cursor Agent, Kimi, and Grok. For Claude Code, `ANTHROPIC_BASE_URL` in the process environment selects z.ai or Kimi when it points at their gateway, and no provider when it points at another one.
+
+The check runs when an application comes to the front and repeats off the main thread while that application hosts terminals: every three seconds at first, every six once the application has been in front for about fifteen seconds, and every ten in Low Power Mode. It stops while the display sleeps and when fewer than two providers can be shown. It needs no Accessibility, Automation, or Screen Recording access, and nothing it reads is stored or sent.
 
 ## Credential discovery
 

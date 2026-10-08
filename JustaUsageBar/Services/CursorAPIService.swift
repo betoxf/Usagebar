@@ -189,7 +189,7 @@ final class CursorAPIService {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue(token.cookieHeader, forHTTPHeaderField: "Cookie")
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await ProviderHTTP.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw APIError.unknown(0)
         }
@@ -269,11 +269,7 @@ final class CursorAPIService {
     }
 
     private func parseDate(_ string: String) -> Date? {
-        let iso8601 = ISO8601DateFormatter()
-        iso8601.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = iso8601.date(from: string) { return date }
-        iso8601.formatOptions = [.withInternetDateTime]
-        return iso8601.date(from: string)
+        ISO8601Timestamp.date(from: string)
     }
 }
 

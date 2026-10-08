@@ -296,7 +296,7 @@ final class ClaudeOAuthService {
         request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
         request.setValue(oauthUserAgent, forHTTPHeaderField: "User-Agent")
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await ProviderHTTP.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw APIError.unknown(0)
@@ -316,7 +316,7 @@ final class ClaudeOAuthService {
 
                     var retryRequest = request
                     retryRequest.setValue("Bearer \(newCreds.accessToken)", forHTTPHeaderField: "Authorization")
-                    let (retryData, retryResponse) = try await URLSession.shared.data(for: retryRequest)
+                    let (retryData, retryResponse) = try await ProviderHTTP.data(for: retryRequest)
                     if let http = retryResponse as? HTTPURLResponse, http.statusCode == 429 {
                         throw APIError.rateLimited(retryAfter: HTTPRetryAfter.date(from: http))
                     }
@@ -365,7 +365,7 @@ final class ClaudeOAuthService {
         ]
         request.httpBody = components.percentEncodedQuery?.data(using: .utf8)
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await ProviderHTTP.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw APIError.unknown(0)
@@ -514,10 +514,6 @@ final class ClaudeOAuthService {
     }
 
     private func parseDate(_ string: String) -> Date? {
-        let iso8601 = ISO8601DateFormatter()
-        iso8601.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = iso8601.date(from: string) { return date }
-        iso8601.formatOptions = [.withInternetDateTime]
-        return iso8601.date(from: string)
+        ISO8601Timestamp.date(from: string)
     }
 }

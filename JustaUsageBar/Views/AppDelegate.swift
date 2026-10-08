@@ -17,7 +17,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private var statusItem: NSStatusItem!
     private var menu: NSMenu!
-    private var isMenuOpen = false
+    private var isMenuOpen = false {
+        didSet { viewModel.menuVisibilityChanged(isOpen: isMenuOpen) }
+    }
     private var lastRenderKey: StatusRenderKey?
     private var cachedStatusImages: [DisplayProvider: (StatusRenderKey, NSImage, CGFloat)] = [:]
 
@@ -51,9 +53,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var currentProvider: DisplayProvider = .claude
     private let providerSwitchTimer = RepeatingTimer()
     private var rotationSignature = ""
-    /// Provider forced by the frontmost app (Claude/ChatGPT/Codex/ZCode), nil when
-    /// no matching app is active.
+    /// Provider forced by the frontmost app (Claude/ChatGPT/Codex/ZCode) or by the
+    /// AI CLI in its terminal, nil when neither is active.
     private var focusProvider: DisplayProvider?
+    private var terminalWatch: Task<Void, Never>?
+    /// What the terminal watch last found in the frontmost app.
+    private var terminalProvider: DisplayProvider?
 
     // Update availability state
     private var availableUpdateVersion: String?
@@ -76,9 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.setActivationPolicy(.accessory)
         presentPendingUpdateFailureIfNeeded()
 
-        if viewModel.followActiveApp, let frontmost = NSWorkspace.shared.frontmostApplication {
-            focusProvider = provider(matching: frontmost)
-        }
+        followFrontmostApp()
         if viewModel.hasCredentials {
             syncCurrentProvider(preferSavedSelection: true, persistPreference: true)
             restartProviderAnimation()
@@ -127,23 +130,77 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: - Focus-Aware Provider
 
     @objc private func activeAppChanged(_ notification: Notification) {
-        guard viewModel.followActiveApp, viewModel.hasCredentials else { return }
         guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else {
             return
         }
+        follow(app)
+    }
 
-        let newFocus = provider(matching: app)
-        guard newFocus != focusProvider else { return }
-        focusProvider = newFocus
-
-        if let provider = newFocus, canDisplay(provider) {
-            stopProviderAnimation()
-            setCurrentProvider(provider, persistPreference: false)
-            updateStatusImage()
-        } else {
-            syncCurrentProvider(preferSavedSelection: true)
-            restartProviderAnimation()
+    private func followFrontmostApp() {
+        if let app = NSWorkspace.shared.frontmostApplication {
+            follow(app)
         }
+    }
+
+    /// Shows the provider of the AI app in front. Any other app leaves the last
+    /// provider on screen, unless an AI CLI runs in one of its terminal sessions.
+    private func follow(_ app: NSRunningApplication) {
+        if viewModel.followActiveApp {
+            setFocus(provider(matching: app))
+        }
+        terminalProvider = nil
+        watchTerminalSessions(of: app)
+    }
+
+    /// Restarts the watch without re-applying the app's focus, so a manual pick
+    /// survives sleep and refreshes.
+    private func resumeTerminalWatch() {
+        if let app = NSWorkspace.shared.frontmostApplication {
+            watchTerminalSessions(of: app)
+        }
+    }
+
+    private func setFocus(_ provider: DisplayProvider?) {
+        guard provider != focusProvider else { return }
+        focusProvider = provider
+        restartProviderAnimation()
+    }
+
+    /// Polls the app's terminal sessions off the main thread while it stays in front.
+    private func watchTerminalSessions(of app: NSRunningApplication) {
+        terminalWatch?.cancel()
+        terminalWatch = nil
+        guard viewModel.followActiveApp, !viewModel.isBackgroundSuspended, displayableProviders().count > 1,
+              provider(matching: app) == nil else { return }
+        let pid = app.processIdentifier
+        let isTerminal = TerminalAgentDetector.terminalBundleIDs.contains(app.bundleIdentifier?.lowercased() ?? "")
+        let isLowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
+        let known = terminalProvider
+
+        terminalWatch = Task.detached(priority: .utility) { [weak self] in
+            var reported = known
+            var scans = 0
+            while !Task.isCancelled {
+                let scan = TerminalAgentDetector.scan(app: pid, isTerminal: isTerminal)
+                guard scan.hostsTerminals else { return }
+                // Once its CLI is gone, a terminal is like any other app.
+                if scan.provider != reported {
+                    reported = scan.provider
+                    await self?.terminalSessionChanged(to: scan.provider)
+                }
+                // A CLI is most often started right after its terminal comes forward.
+                scans += 1
+                let interval: Duration = isLowPower ? .seconds(10) : (scans < 5 ? .seconds(3) : .seconds(6))
+                try? await Task.sleep(for: interval, tolerance: .seconds(1))
+            }
+        }
+    }
+
+    private func terminalSessionChanged(to provider: DisplayProvider?) {
+        // The app may have left the front while this result crossed threads.
+        guard !Task.isCancelled else { return }
+        terminalProvider = provider
+        setFocus(provider)
     }
 
     private func provider(matching app: NSRunningApplication) -> DisplayProvider? {
@@ -181,6 +238,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func backgroundActivityChanged() {
         restartProviderAnimation()
+        resumeTerminalWatch()
     }
 
     @objc private func settingsChanged() {
@@ -197,7 +255,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func usageDataChanged() {
         if viewModel.hasCredentials {
             syncCurrentProvider()
-            if currentRotationSignature != rotationSignature { restartProviderAnimation() }
+            if currentRotationSignature != rotationSignature {
+                restartProviderAnimation()
+                resumeTerminalWatch()
+            }
             updateStatusImage()
         } else {
             showSetupStatus()
@@ -334,8 +395,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func rebuildMenu() {
-        // Countdown labels are recomputed on open. Closed menus need no work.
-        guard isMenuOpen else { return }
+        // Countdown labels are recomputed on open. Closed menus need no work,
+        // and replacing the items would close a submenu the pointer is in.
+        guard isMenuOpen, menu.highlightedItem?.submenu == nil else { return }
         menu.removeAllItems()
 
         let hasClaude = viewModel.hasClaudeCredentials
@@ -720,7 +782,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     let followItem = NSMenuItem(title: "Follow Active App", action: #selector(toggleFollowActiveApp), keyEquivalent: "")
                     followItem.target = self
                     followItem.state = viewModel.followActiveApp ? .on : .off
-                    followItem.toolTip = "Show a provider's usage when its app (Claude, ChatGPT/Codex, Cursor, KimiCode, ZCode, or Grok) is in front"
+                    followItem.toolTip = "Show the provider of the AI app or terminal CLI you used last (Claude, ChatGPT/Codex, Cursor, KimiCode, ZCode, or Grok)"
                     displayMenu.addItem(followItem)
 
                     let intervalMenu = NSMenu()
@@ -1005,10 +1067,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func toggleFollowActiveApp() {
         viewModel.followActiveApp.toggle()
-        focusProvider = viewModel.followActiveApp
-            ? NSWorkspace.shared.frontmostApplication.flatMap { provider(matching: $0) }
-            : nil
+        focusProvider = nil
         syncCurrentProvider(preferSavedSelection: true)
+        followFrontmostApp()
         restartProviderAnimation()
         rebuildMenu()
     }
@@ -1492,7 +1553,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         request.setValue("Usagebar", forHTTPHeaderField: "User-Agent")
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await ProviderHTTP.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
             throw URLError(.badServerResponse)
@@ -1737,14 +1798,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         syncCurrentProvider()
         rotationSignature = currentRotationSignature
 
-        guard viewModel.shouldAnimateProviders else {
-            return
-        }
-
         // Hold on the focused app's provider instead of flipping under it.
-        if viewModel.followActiveApp, let focusProvider, canDisplay(focusProvider) {
-            return
-        }
+        let holdsFocus = viewModel.followActiveApp && focusProvider.map(canDisplay) == true
+        let rotates = viewModel.shouldAnimateProviders && !holdsFocus
+        viewModel.rotationChanged(isRotating: rotates)
+        guard rotates else { return }
 
         providerSwitchTimer.start(every: viewModel.animationInterval) { [weak self] in
             guard let self, let nextProvider = self.providerAfter(self.currentProvider) else { return }

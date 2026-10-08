@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## [1.10.0](https://github.com/betoxf/Usagebar/releases/tag/v1.10.0) — 2026-10-08
 
 ### Focus following
 

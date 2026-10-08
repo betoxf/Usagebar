@@ -18,6 +18,7 @@ xcrun swiftc -swift-version 5 -default-isolation MainActor -parse-as-library -O 
   "$ROOT_DIR/JustaUsageBar/Models/DisplayProvider.swift" \
   "$ROOT_DIR/JustaUsageBar/Models/UsageData.swift" \
   "$ROOT_DIR/JustaUsageBar/Models/UsageRefreshPolicy.swift" \
+  "$ROOT_DIR/JustaUsageBar/Services/KeychainTool.swift" \
   "$ROOT_DIR/JustaUsageBar/Services/ProviderActor.swift" \
   "$ROOT_DIR/JustaUsageBar/Services/ProviderHTTP.swift" \
   "$ROOT_DIR/JustaUsageBar/Services/RepeatingTimer.swift" \

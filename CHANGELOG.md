@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.10.1](https://github.com/betoxf/Usagebar/releases/tag/v1.10.1) — 2026-10-09
+
+- Read the z.ai Keychain key through the system `security` tool instead of in the app. An update no longer brings up a password dialog for it, and a dialog that is left unanswered no longer holds up the other providers.
+
 ## [1.10.0](https://github.com/betoxf/Usagebar/releases/tag/v1.10.0) — 2026-10-08
 
 ### Focus following

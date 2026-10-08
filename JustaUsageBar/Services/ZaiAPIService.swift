@@ -48,6 +48,7 @@ final class ZaiAPIService {
     private var cachedKey: String??
     private var lastKeyCheck: Date?
     private let keyCacheTTL: TimeInterval = 300
+    private let keychain = KeychainTool()
 
     private init() {}
 
@@ -56,6 +57,7 @@ final class ZaiAPIService {
     func clearCache() {
         cachedKey = nil
         lastKeyCheck = nil
+        keychain.reset()
     }
 
     var hasCredentials: Bool {
@@ -65,9 +67,11 @@ final class ZaiAPIService {
     /// Resolves the API key from the environment first, then a small set of
     /// known local config files. Returns nil when Z.ai isn't configured.
     private func apiKey() -> String? {
-        if let lastKeyCheck,
-           Date().timeIntervalSince(lastKeyCheck) < keyCacheTTL,
-           let cachedKey {
+        // A key that was found stays until Refresh or until z.ai rejects it, so
+        // the keychain is not read again every few minutes. A missing one is
+        // looked for again once the cache expires.
+        if let lastKeyCheck, let cachedKey,
+           cachedKey != nil || Date().timeIntervalSince(lastKeyCheck) < keyCacheTTL {
             return cachedKey
         }
 
@@ -152,10 +156,16 @@ final class ZaiAPIService {
             ""
         ]
 
+        // Reading a secret in process raises a password dialog after every update,
+        // and that dialog holds up every provider until it is answered. So find
+        // the item from its attributes, which never ask, and leave the secret to
+        // `security`, which reads these items the way the user's shell does.
+        var tried: Set<String> = []
         for service in services {
             for account in accounts {
-                if let value = readKeychainPassword(service: service, account: account),
-                   !value.isEmpty {
+                guard let found = keychainAccount(service: service, account: account),
+                      tried.insert(service + "\n" + found).inserted else { continue }
+                if let value = keychain.password(service: service, account: found) {
                     return value
                 }
             }
@@ -163,11 +173,12 @@ final class ZaiAPIService {
         return nil
     }
 
-    private func readKeychainPassword(service: String, account: String) -> String? {
+    /// The account of the matching item, read from attributes only.
+    private func keychainAccount(service: String, account: String) -> String? {
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecReturnData as String: true,
+            kSecReturnAttributes as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne
         ]
         if !account.isEmpty {
@@ -175,13 +186,11 @@ final class ZaiAPIService {
         }
 
         var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
-        guard status == errSecSuccess, let data = item as? Data else {
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+              let attributes = item as? [String: Any] else {
             return nil
         }
-        let value = String(data: data, encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return (value?.isEmpty == false) ? value : nil
+        return attributes[kSecAttrAccount as String] as? String ?? ""
     }
 
     // MARK: - Fetch Usage
@@ -208,6 +217,9 @@ final class ZaiAPIService {
         case 200:
             return try parseQuota(data)
         case 401, 403:
+            // The key may have been replaced since it was read.
+            cachedKey = nil
+            lastKeyCheck = nil
             throw APIError.unauthorized
         case 429:
             throw APIError.rateLimited(retryAfter: HTTPRetryAfter.date(from: httpResponse))

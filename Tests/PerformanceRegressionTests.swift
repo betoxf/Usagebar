@@ -17,7 +17,8 @@ struct PerformanceRegressionTests {
         testTerminalCommands()
         try await testTerminalSessionScan()
         await testProviderHTTP()
-        print("PASS: refresh policy, retry headers, timer lifetime, refresh orchestration, terminal sessions, and request sessions")
+        try testKeychainTool()
+        print("PASS: refresh policy, retry headers, timer lifetime, refresh orchestration, terminal sessions, request sessions, and keychain reads")
     }
 
     static func check(_ condition: Bool, _ message: String) {
@@ -240,6 +241,50 @@ struct PerformanceRegressionTests {
         try await Task.sleep(nanoseconds: 10_000_000)
         let foreign = TerminalAgentDetector.scan(app: 1, isTerminal: true)
         check(foreign.provider != .zai && foreign.hostsTerminals, "Claimed another application's terminal session")
+    }
+
+    /// A keychain dialog must never hold up the caller, be stacked, or be raised again after a refusal.
+    static func testKeychainTool() throws {
+        // Stands in for /usr/bin/security: answers at once, or only after the
+        // user has dealt with a dialog.
+        let stub = FileManager.default.temporaryDirectory.appendingPathComponent("usagebar-security-\(getpid())")
+        try """
+        #!/bin/sh
+        case "$3" in
+            trusted) echo " secret " ;;
+            missing) exit 44 ;;
+            allowed) sleep 1; echo later ;;
+            refused) sleep 1; exit 128 ;;
+        esac
+        """.write(to: stub, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: stub.path)
+        defer { try? FileManager.default.removeItem(at: stub) }
+
+        func answer(_ tool: KeychainTool, _ service: String) -> String? {
+            for _ in 0..<300 {
+                if let password = tool.password(service: service, account: "me") { return password }
+                usleep(10_000)
+            }
+            return nil
+        }
+
+        let tool = KeychainTool(executable: stub.path, patience: 0.3)
+        check(tool.password(service: "trusted", account: "me") == "secret", "Trusted read failed")
+        check(tool.password(service: "missing", account: "") == nil, "Read an item that does not exist")
+        check(tool.password(service: "trusted", account: "") == "secret", "A missing item counted as a refusal")
+
+        let asked = Date()
+        check(tool.password(service: "allowed", account: "me") == nil, "Read a secret before it was allowed")
+        check(Date().timeIntervalSince(asked) < 0.9, "Waited for the keychain dialog")
+        check(tool.password(service: "trusted", account: "me") == nil, "Stacked a second dialog")
+        check(answer(tool, "allowed") == "later", "Lost the answer to the dialog")
+
+        check(tool.password(service: "refused", account: "me") == nil, "Read a secret before it was allowed")
+        usleep(1_300_000)
+        check(tool.password(service: "trusted", account: "me") == nil, "Asked again after a refusal")
+        check(tool.password(service: "trusted", account: "me") == nil, "Asked again after a refusal")
+        tool.reset()
+        check(tool.password(service: "trusted", account: "me") == "secret", "Refresh could not ask again")
     }
 
     /// Overlapping and repeated requests must never reach a session that was already closed.

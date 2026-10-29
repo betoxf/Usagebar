@@ -5,6 +5,8 @@
 //  Reads Cursor.app's local auth token and fetches usage from cursor.com.
 //  Approach mirrors CodexBar: read the accessToken JWT from Cursor's VS Code
 //  state.vscdb, synthesize a WorkosCursorSessionToken cookie, call the web API.
+//  Cursor now encrypts that token at rest, so Cursor Agent's Keychain copy
+//  is the fallback.
 //
 
 import CryptoKit
@@ -56,6 +58,7 @@ final class CursorAPIService {
     private var cachedToken: CursorToken?
     private var lastTokenCheck: Date?
     private let tokenCacheTTL: TimeInterval = 300
+    private let keychain = KeychainTool()
 
     nonisolated private struct CursorToken {
         let subject: String
@@ -87,6 +90,7 @@ final class CursorAPIService {
     func clearCache() {
         cachedToken = nil
         lastTokenCheck = nil
+        keychain.reset()
     }
 
     private func loadToken() -> CursorToken? {
@@ -96,14 +100,14 @@ final class CursorAPIService {
             return cachedToken
         }
 
-        guard let accessToken = readStateValue(key: "cursorAuth/accessToken"),
-              !accessToken.isEmpty,
-              let claims = decodeJWTClaims(accessToken),
-              let sub = claims["sub"] as? String else {
+        guard let found = readAccessToken(),
+              let sub = found.claims["sub"] as? String else {
             cachedToken = nil
             lastTokenCheck = Date()
             return nil
         }
+        let accessToken = found.jwt
+        let claims = found.claims
 
         // sub is typically "auth0|user_..." — Cursor's cookie wants the trailing id.
         let userID = sub.split(separator: "|").last.map(String.init) ?? sub
@@ -117,6 +121,21 @@ final class CursorAPIService {
         cachedToken = token
         lastTokenCheck = Date()
         return token
+    }
+
+    /// The first session JWT that can be read. Cursor 3.28 and later keep the
+    /// one in state.vscdb encrypted ("cursor-safe-storage:v1:…"), so Cursor
+    /// Agent's plain copy in the Keychain comes next. `/usr/bin/security`
+    /// created that item, so `KeychainTool` reads it without a dialog.
+    private func readAccessToken() -> (jwt: String, claims: [String: Any])? {
+        if let jwt = readStateValue(key: "cursorAuth/accessToken"), let claims = decodeJWTClaims(jwt) {
+            return (jwt, claims)
+        }
+        if let jwt = keychain.password(service: "cursor-access-token", account: "cursor-user"),
+           let claims = decodeJWTClaims(jwt) {
+            return (jwt, claims)
+        }
+        return nil
     }
 
     /// Reads a single value from the VS Code-style SQLite key/value store,
@@ -177,8 +196,8 @@ final class CursorAPIService {
 
     func fetchUsage() async throws -> CursorUsageData {
         var token = loadToken()
-        // Cursor.app refreshes its own token in the DB; if our cached copy is
-        // expired, drop it and re-read the fresh one before making the request.
+        // Cursor.app and Cursor Agent refresh their own tokens; if our cached copy
+        // is expired, drop it and re-read the fresh one before making the request.
         if let current = token, let expiresAt = current.expiresAt, expiresAt <= Date() {
             clearCache()
             token = loadToken()

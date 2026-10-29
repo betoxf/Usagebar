@@ -95,8 +95,8 @@ Re-authenticate from the terminal — this is the reliable fix:
 Usagebar reads the credentials Claude Code writes locally and never rotates
 them itself, so a fresh terminal login is always picked up automatically.
 
-Cursor is discovered from the Cursor.app login (no extra setup). z.ai appears
-when a `Z_AI_API_KEY` is configured (environment variable or
+Cursor is discovered from the Cursor.app or Cursor Agent CLI login (no extra
+setup). z.ai appears when a `Z_AI_API_KEY` is configured (environment variable or
 `~/.zai/config.json` with `{"apiKey": "..."}`).
 
 KimiCode is discovered from `~/.kimi-code/credentials/kimi-code.json` after
@@ -137,7 +137,7 @@ Install Usagebar and sign in to Claude Code as usual (`claude login`). The menu 
 Yes. Usagebar reads the Codex CLI sign-in (`codex login`) and shows the Codex primary and weekly windows with their reset times.
 
 **Does it work with Cursor and Grok Bot?**
-Yes. Cursor is picked up from the Cursor app's sign-in, and its weekly allowance is shared with Grok Bot, so the menu bar shows them together.
+Yes. Cursor is picked up from the Cursor app's or Cursor Agent CLI's sign-in, and its weekly allowance is shared with Grok Bot, so the menu bar shows them together.
 
 **Is Usagebar free? Does it collect my data?**
 It's free and open source (MIT). There is no Usagebar account, no telemetry, and no server in between: usage travels directly between your Mac and each provider.

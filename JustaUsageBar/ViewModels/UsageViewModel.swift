@@ -166,6 +166,9 @@ final class UsageViewModel: ObservableObject {
     var hasZaiCredentials: Bool { availableProviders.contains(.zai) }
     var hasXaiCredentials: Bool { availableProviders.contains(.xai) }
     var hasKimiCredentials: Bool { availableProviders.contains(.kimi) }
+    /// Grok on unified billing draws on the Cursor plan, so with Cursor signed in
+    /// the Cursor entry, whose marks include xAI and Grok, stands for both.
+    var xaiSharesCursorPlan: Bool { hasCursorCredentials && xaiUsageData.isUnifiedBilling }
 
     var shouldAnimateProviders: Bool {
         !isBackgroundSuspended && !lowPowerMode &&

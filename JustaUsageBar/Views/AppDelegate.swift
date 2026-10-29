@@ -416,7 +416,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let hasCodex = viewModel.hasCodexCredentials
         let hasCursor = viewModel.hasCursorCredentials
         let hasZai = viewModel.hasZaiCredentials
-        let hasXai = viewModel.hasXaiCredentials
+        let hasXai = hasCredentials(for: .xai)
         let hasKimi = viewModel.hasKimiCredentials
 
         if !hasClaude && !hasCodex && !hasCursor && !hasZai && !hasXai && !hasKimi {
@@ -765,7 +765,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             ))
         }
 
-        if viewModel.hasXaiCredentials && viewModel.showXai {
+        if hasCredentials(for: .xai) && viewModel.showXai {
             let xai = viewModel.xaiUsageData
             cards.append(UsagePanelCard(
                 provider: .xai,
@@ -1605,8 +1605,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .zai:
             return viewModel.hasZaiCredentials
         case .xai:
-            return viewModel.hasXaiCredentials
+            return viewModel.hasXaiCredentials && !viewModel.xaiSharesCursorPlan
         }
+    }
+
+    /// Grok sharing the Cursor plan is shown as Cursor, whose marks include it.
+    private func shownProvider(for provider: DisplayProvider) -> DisplayProvider {
+        provider == .xai && viewModel.xaiSharesCursorPlan ? .cursor : provider
+    }
+
+    private var shownFocusProvider: DisplayProvider? {
+        focusProvider.map(shownProvider)
     }
 
     private func isProviderEnabled(_ provider: DisplayProvider) -> Bool {
@@ -1667,6 +1676,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func resolveProvider(preferred provider: DisplayProvider) -> DisplayProvider? {
+        let provider = shownProvider(for: provider)
         if canDisplay(provider) {
             return provider
         }
@@ -1684,7 +1694,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func syncCurrentProvider(preferSavedSelection: Bool = false, persistPreference: Bool = false) {
         // A Claude/ChatGPT/Codex app in front wins over saved selection and timer.
-        if viewModel.followActiveApp, let focusProvider, canDisplay(focusProvider) {
+        if viewModel.followActiveApp, let focusProvider = shownFocusProvider, canDisplay(focusProvider) {
             setCurrentProvider(focusProvider, persistPreference: false)
             return
         }
@@ -1700,7 +1710,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private var currentRotationSignature: String {
         [String(viewModel.shouldAnimateProviders), String(viewModel.animationInterval),
-         viewModel.followActiveApp ? (focusProvider?.rawValue ?? "none") : "manual",
+         viewModel.followActiveApp ? (shownFocusProvider?.rawValue ?? "none") : "manual",
          displayableProviders().map(\.rawValue).joined(separator: ",")].joined(separator: "|")
     }
 
@@ -1710,7 +1720,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         rotationSignature = currentRotationSignature
 
         // Hold on the focused app's provider instead of flipping under it.
-        let holdsFocus = viewModel.followActiveApp && focusProvider.map(canDisplay) == true
+        let holdsFocus = viewModel.followActiveApp && shownFocusProvider.map(canDisplay) == true
         let rotates = viewModel.shouldAnimateProviders && !holdsFocus
         viewModel.rotationChanged(isRotating: rotates)
         guard rotates else { return }
@@ -1973,6 +1983,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return templateImage(size: NSSize(width: marks.width, height: height), paths: marks.paths)
     }
 
+    /// A template asset filled with `color`, `height` points tall, for drawing
+    /// into the status images, which are drawn in color rather than as templates.
+    private func tintedAsset(_ name: String, height: CGFloat, color: NSColor) -> NSImage? {
+        guard let asset = NSImage(named: name), asset.size.height > 0 else { return nil }
+        let size = NSSize(width: height * asset.size.width / asset.size.height, height: height)
+        return NSImage(size: size, flipped: false) { rect in
+            asset.draw(in: rect)
+            color.set()
+            rect.fill(using: .sourceAtop)
+            return true
+        }
+    }
+
     /// Fills `paths` into a vector template image, so it renders sharp and
     /// takes the tint of the view that shows it.
     private func templateImage(size: NSSize, paths: [NSBezierPath]) -> NSImage {
@@ -2229,12 +2252,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         var yOffset: CGFloat = 0
 
         if showIcon {
-            let starColor = brandClaudeColor
-            let starAttributes: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: 7, weight: .bold),
-                .foregroundColor: starColor
-            ]
-            let starString = NSAttributedString(string: "\u{2733}\u{FE0E}", attributes: starAttributes)
+            // The spark from the panel, in Claude's orange.
+            let spark = tintedAsset("ClaudeSpark", height: 7, color: .usagebarClaudeOrange)
+            let sparkWidth = spark?.size.width ?? 0
 
             let labelAttributes: [NSAttributedString.Key: Any] = [
                 .font: NSFont.systemFont(ofSize: 7, weight: .medium),
@@ -2242,11 +2262,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             ]
             let labelString = NSAttributedString(string: "Claude", attributes: labelAttributes)
 
-            let totalLabelWidth = starString.size().width + 1 + labelString.size().width
+            let totalLabelWidth = sparkWidth + 1.5 + labelString.size().width
             let labelStartX = (width - totalLabelWidth) / 2
 
-            starString.draw(at: NSPoint(x: labelStartX, y: 12))
-            labelString.draw(at: NSPoint(x: labelStartX + starString.size().width + 1, y: 12))
+            spark?.draw(in: NSRect(x: labelStartX, y: 13, width: sparkWidth, height: 7))
+            labelString.draw(at: NSPoint(x: labelStartX + sparkWidth + 1.5, y: 12))
             yOffset = 0
         } else {
             yOffset = 3
@@ -2344,28 +2364,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         var yOffset: CGFloat = 0
 
         if showIcon {
-            // Draw icon and "Codex" label (no gradient, just black/white)
-            let iconFont = NSFont.systemFont(ofSize: 6, weight: .regular)
-            let iconString = ">_"
-            let codexIconColor = codexBrandColor
-
-            let iconAttrs: [NSAttributedString.Key: Any] = [
-                .font: iconFont,
-                .foregroundColor: codexIconColor
-            ]
-            let codexIcon = NSAttributedString(string: iconString, attributes: iconAttrs)
-
-            let codexLabelAttrs: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: 7, weight: .semibold),
-                .foregroundColor: codexBrandColor
-            ]
-            let codexLabel = NSAttributedString(string: " Codex", attributes: codexLabelAttrs)
-
-            let totalLabelWidth = codexIcon.size().width + codexLabel.size().width
-            let labelStartX = (width - totalLabelWidth) / 2
-
-            codexIcon.draw(at: NSPoint(x: labelStartX, y: 12))
-            codexLabel.draw(at: NSPoint(x: labelStartX + codexIcon.size().width, y: 12))
+            // The Codex logo and wordmark from the panel, in black or white.
+            let lockupHeight: CGFloat = 9.5
+            if let lockup = tintedAsset("CodexLockup", height: lockupHeight, color: codexBrandColor) {
+                let lockupX = (width - lockup.size.width) / 2
+                lockup.draw(in: NSRect(x: lockupX, y: 11.75, width: lockup.size.width, height: lockupHeight))
+            }
 
             yOffset = 0
         } else {

@@ -21,6 +21,8 @@ nonisolated struct XaiUsageData {
     var weeklyResetAt: Date?
     /// True when the payload included an explicit GrokBuild product row.
     var hasBuildProduct: Bool = false
+    /// Unified billing: the account's Grok usage draws on the Cursor plan.
+    var isUnifiedBilling = false
 
     var timeUntilWeeklyReset: String {
         formatTimeUntil(weeklyResetAt)
@@ -367,6 +369,7 @@ final class XaiAPIService {
         if let percent = doubleValue(config["creditUsagePercent"]) {
             usage.weeklyUsedPercent = clampPercent(percent)
         }
+        usage.isUnifiedBilling = config["isUnifiedBillingUser"] as? Bool == true
 
         if let period = config["currentPeriod"] as? [String: Any] {
             usage.weeklyResetAt = parseDate(period["end"])

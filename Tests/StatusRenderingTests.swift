@@ -119,6 +119,17 @@ extension AppDelegate {
         precondition(currentProvider == .claude, "Resuming the watch overrode a manual pick")
         terminalSessionChanged(to: nil)
         precondition(focusProvider == nil && currentProvider == .claude, "A CLI that ended moved the provider")
+
+        // Grok on the Cursor plan is shown as Cursor, not as a second entry.
+        viewModel.useRenderingFixtures([.claude, .cursor, .xai])
+        viewModel.showCursor = true
+        viewModel.showXai = true
+        precondition(panelCards().contains { $0.provider == .xai }, "Grok on its own plan was hidden")
+        viewModel.xaiUsageData.isUnifiedBilling = true
+        setFocus(.xai)
+        precondition(currentProvider == .cursor, "Grok in front did not show the Cursor plan")
+        precondition(!displayableProviders().contains(.xai) && !panelCards().contains { $0.provider == .xai },
+                     "Grok on the Cursor plan was shown twice")
         viewModel.followActiveApp = false
         follow(.current)
         precondition(terminalWatch == nil, "Watching continued with Follow Active App off")
@@ -144,6 +155,6 @@ struct StatusRenderingTests {
         let model = UsageViewModel(startAutomatically: false)
         let output = ProcessInfo.processInfo.environment["USAGEBAR_RENDER_OUTPUT"].map { URL(fileURLWithPath: $0) }
         try AppDelegate(viewModel: model).verifyRendering(output: output)
-        print("PASS: setup/Claude/Codex menus, closed-menu reuse, status image caching, light/dark rendering, focus following")
+        print("PASS: setup/Claude/Codex menus, closed-menu reuse, status image caching, light/dark rendering, focus following, shared Cursor plan")
     }
 }

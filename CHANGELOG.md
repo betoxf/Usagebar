@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.11.2](https://github.com/betoxf/Usagebar/releases/tag/v1.11.2) — 2026-10-29
+
+- Find Cursor again after Cursor 3.28 started encrypting its sign-in on disk. Usagebar now falls back to the Cursor Agent CLI's sign-in, so the Cursor card and its xAI, Grok, Cursor and Grok Bot marks are back, and Grok Bot in front selects them again.
+- Show Grok once: when Grok is on unified billing with Cursor, the Cursor card stands for both instead of a second XAI card with the same usage.
+- Show the Claude spark and the Codex logo in the menu bar, the same marks as the panel.
+
 ## [1.11.1](https://github.com/betoxf/Usagebar/releases/tag/v1.11.1) — 2026-10-25
 
 - Show the Usagebar icon beside the title of the usage panel.

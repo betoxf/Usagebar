@@ -116,7 +116,7 @@ nonisolated struct ZaiUsageData { var testValue = 0; static let placeholder = Za
     }
 }
 
-nonisolated struct XaiUsageData { var testValue = 0; static let placeholder = XaiUsageData() }
+nonisolated struct XaiUsageData { var testValue = 0; var isUnifiedBilling = false; static let placeholder = XaiUsageData() }
 
 @ProviderActor final class XaiAPIService {
     static let shared = XaiAPIService()

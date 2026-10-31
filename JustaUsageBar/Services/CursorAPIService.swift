@@ -15,6 +15,17 @@ import SQLite3
 
 // MARK: - Cursor Usage Data Model
 
+nonisolated struct CursorWeeklyReading: Codable, Equatable {
+    var percent: Int
+    var resetAt: Date?
+}
+
+nonisolated enum CursorWeeklyUsage: Equatable {
+    case reading(CursorWeeklyReading)
+    case noAllowance
+    case unavailable
+}
+
 nonisolated struct CursorUsageData {
     var planName: String = "unknown"
     var usedPercent: Int = 0
@@ -27,6 +38,33 @@ nonisolated struct CursorUsageData {
     var sharedWithGrokBot = false
     /// "W" when the reading is Cursor's weekly allowance, "M" for the billing month.
     var windowLabel = "M"
+    /// The weekly request failed on a plan that has a weekly allowance.
+    var weeklyIsStale = false
+
+    /// Plans with a weekly allowance spend it before the monthly one, and Cursor
+    /// and Grok Bot show that weekly figure. When the request fails, the last
+    /// reading stands until it resets, so an outage can't turn a spent allowance
+    /// into the month's 0%.
+    mutating func apply(_ weekly: CursorWeeklyUsage, saved: CursorWeeklyReading?, now: Date = Date()) {
+        switch weekly {
+        case .reading(let reading):
+            show(reading)
+        case .noAllowance:
+            break
+        case .unavailable:
+            guard let saved else { return }
+            weeklyIsStale = true
+            if let reset = saved.resetAt, reset > now {
+                show(saved)
+            }
+        }
+    }
+
+    private mutating func show(_ reading: CursorWeeklyReading) {
+        usedPercent = reading.percent
+        resetAt = reading.resetAt
+        windowLabel = "W"
+    }
 
     var timeUntilReset: String {
         guard let resetAt else { return "--" }
@@ -58,6 +96,7 @@ final class CursorAPIService {
     private var cachedToken: CursorToken?
     private var lastTokenCheck: Date?
     private let tokenCacheTTL: TimeInterval = 300
+    private let savedWeeklyDefaultsKey = "cursorWeeklyReading"
     private let keychain = KeychainTool()
 
     nonisolated private struct CursorToken {
@@ -225,12 +264,16 @@ final class CursorAPIService {
         case 200:
             var usage = try parseUsageSummary(data)
             usage.sharedWithGrokBot = isGrokBotSignedIn(as: token.subject)
-            // Plans with a weekly allowance spend it before the monthly one, and
-            // Cursor and Grok Bot show that weekly figure.
-            if let weekly = await weeklyUsage(token: token) {
-                usage.usedPercent = clampPercent(weekly.percent)
-                usage.resetAt = weekly.resetAt
-                usage.windowLabel = "W"
+            let weekly = await weeklyUsage(token: token)
+            let saved = savedWeeklyReading
+            usage.apply(weekly, saved: saved)
+            switch weekly {
+            case .reading(let reading) where reading != saved:
+                savedWeeklyReading = reading
+            case .noAllowance where saved != nil:
+                savedWeeklyReading = nil
+            default:
+                break
             }
             return usage
         case 401, 403:
@@ -243,10 +286,20 @@ final class CursorAPIService {
         }
     }
 
-    /// The weekly allowance Cursor and Grok Bot show, or nil when the plan has none
-    /// or the request fails; the monthly summary then stands.
-    private func weeklyUsage(token: CursorToken) async -> (percent: Double, resetAt: Date?)? {
-        guard let url = URL(string: usageStatusEndpoint) else { return nil }
+    /// Kept across launches, since a restart during an outage has nothing else.
+    private var savedWeeklyReading: CursorWeeklyReading? {
+        get {
+            UserDefaults.standard.data(forKey: savedWeeklyDefaultsKey)
+                .flatMap { try? JSONDecoder().decode(CursorWeeklyReading.self, from: $0) }
+        }
+        set {
+            UserDefaults.standard.set(newValue.flatMap { try? JSONEncoder().encode($0) }, forKey: savedWeeklyDefaultsKey)
+        }
+    }
+
+    /// The weekly allowance Cursor and Grok Bot show.
+    private func weeklyUsage(token: CursorToken) async -> CursorWeeklyUsage {
+        guard let url = URL(string: usageStatusEndpoint) else { return .unavailable }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.timeoutInterval = 15
@@ -257,13 +310,17 @@ final class CursorAPIService {
 
         guard let (data, response) = try? await ProviderHTTP.data(for: request),
               (response as? HTTPURLResponse)?.statusCode == 200,
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              json["hasNonZeroIncludedLimit"] as? Bool == true,
-              let percent = doubleValue(json["usagePercent"]) else {
-            return nil
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return .unavailable
+        }
+        guard json["hasNonZeroIncludedLimit"] as? Bool == true else {
+            return .noAllowance
+        }
+        guard let percent = doubleValue(json["usagePercent"]) else {
+            return .unavailable
         }
         let resetAt = (json["nextResetTimestampUtc"] as? String).flatMap(parseDate)
-        return (percent, resetAt)
+        return .reading(CursorWeeklyReading(percent: clampPercent(percent), resetAt: resetAt))
     }
 
     /// Grok Bot keeps its Cursor accounts keyed by the SHA-256 of the account's

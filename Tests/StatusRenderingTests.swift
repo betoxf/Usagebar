@@ -62,6 +62,7 @@ extension AppDelegate {
         }
 
         verifyPlanNames()
+        verifyCursorOutage()
 
         viewModel.useRenderingFixtures([.claude, .codex])
         let sheet = NSImage(size: NSSize(width: 560, height: 240))
@@ -160,6 +161,39 @@ extension AppDelegate {
         }
     }
 
+    private func verifyCursorOutage() {
+        let now = Date()
+        let saved = CursorWeeklyReading(percent: 100, resetAt: now.addingTimeInterval(3600))
+        func usage(_ weekly: CursorWeeklyUsage, saved: CursorWeeklyReading?, at time: Date) -> CursorUsageData {
+            var usage = CursorUsageData()
+            usage.apply(weekly, saved: saved, now: time)
+            return usage
+        }
+
+        let outage = usage(.unavailable, saved: saved, at: now)
+        precondition(outage.usedPercent == 100 && outage.windowLabel == "W" && outage.weeklyIsStale,
+                     "An outage replaced the weekly reading with the month's")
+        let afterReset = usage(.unavailable, saved: saved, at: now.addingTimeInterval(7200))
+        precondition(afterReset.usedPercent == 0 && afterReset.windowLabel == "M" && afterReset.weeklyIsStale,
+                     "A weekly reading outlived its reset")
+        let monthlyPlan = usage(.unavailable, saved: nil, at: now)
+        precondition(monthlyPlan.windowLabel == "M" && !monthlyPlan.weeklyIsStale, "A plan without a weekly allowance was flagged")
+        let live = usage(.reading(saved), saved: nil, at: now)
+        precondition(live.usedPercent == 100 && live.windowLabel == "W" && !live.weeklyIsStale, "A live weekly reading was missed")
+        let noneNow = usage(.noAllowance, saved: saved, at: now)
+        precondition(noneNow.windowLabel == "M" && !noneNow.weeklyIsStale, "A plan that lost its allowance kept the old reading")
+
+        viewModel.useRenderingFixtures([.cursor])
+        viewModel.showCursor = true
+        viewModel.cursorUsageData = outage
+        precondition(panelCards().first { $0.provider == .cursor }?.message == "Couldn't refresh weekly usage",
+                     "A stale weekly reading looked current")
+        viewModel.cursorUsageData = live
+        precondition(panelCards().first { $0.provider == .cursor }?.message == nil, "A current reading was flagged")
+        viewModel.cursorUsageData = .placeholder
+        viewModel.showCursor = false
+    }
+
     private func verifyPlanNames() {
         func plan(_ type: String?, _ tier: String?) -> String? {
             ClaudeOAuthService.OAuthCredentials(accessToken: "", scopes: [], subscriptionType: type, rateLimitTier: tier).planName
@@ -241,6 +275,6 @@ struct StatusRenderingTests {
         let model = UsageViewModel(startAutomatically: false)
         let output = ProcessInfo.processInfo.environment["USAGEBAR_RENDER_OUTPUT"].map { URL(fileURLWithPath: $0) }
         try AppDelegate(viewModel: model).verifyRendering(output: output)
-        print("PASS: plan names, setup status and model, setup/Claude/Codex menus, closed-menu reuse, status image caching, light/dark rendering, Claude without a 5-hour window, focus following")
+        print("PASS: Cursor outages, plan names, setup status and model, setup/Claude/Codex menus, closed-menu reuse, status image caching, light/dark rendering, Claude without a 5-hour window, focus following")
     }
 }

@@ -15,6 +15,9 @@
   <p>
     <a href="https://bullfighterstudio.com/usagebar">Website</a> ·
     <a href="#installation">Install</a> ·
+    <a href="#install-with-your-coding-agent">Install with an agent</a> ·
+    <a href="#quick-start">Quick start</a> ·
+    <a href="#update-and-uninstall">Update and uninstall</a> ·
     <a href="#how-it-works">How it works</a> ·
     <a href="CHANGELOG.md">Changelog</a> ·
     <a href="docs/ARCHITECTURE.md">Architecture</a> ·
@@ -31,20 +34,6 @@
   <img src="images/panel.png" alt="Usagebar panel with Claude Code, Codex, Cursor, and z.ai usage limits, meters, and reset times" width="340">
 </p>
 
-## Why Usagebar
-
-Usage limits matter most while you are working. Usagebar keeps your Claude Code, Codex, and Cursor limits (the weekly allowance, plus the current five-hour window on plans that have one) visible in the menu bar, then gets out of the way. Right-click it for a panel with every provider, a meter for each limit, and its reset time.
-
-| Capability | What it gives you |
-| --- | --- |
-| Multiple providers | Track Claude, Codex, Kimi Code, Cursor, and z.ai from one status item. |
-| At-a-glance limits | See rolling-window and weekly percentages without opening a browser. |
-| Focus-aware switching | Show the provider of the AI tool you used last: the Claude, ChatGPT/Codex, Cursor or Grok Bot, Kimi Code, or ZCode app, or the Claude Code, Codex, Cursor, or Kimi CLI running in your terminal. |
-| Usage panel | One card per provider with its plan, a meter per limit, and the time until it resets. Click a card to show that provider in the menu bar. |
-| Local credential discovery | Reuse the Claude Code, Codex, Cursor, Kimi Code, and z.ai sign-ins already on the Mac. No API keys to paste. |
-| Privacy-first operation | No Usagebar account, telemetry, analytics, or intermediary backend. |
-| Lightweight runtime | A native Swift menu-bar app with no web runtime or bundled service. |
-
 ## Installation
 
 ### Homebrew (recommended)
@@ -53,7 +42,64 @@ Usage limits matter most while you are working. Usagebar keeps your Claude Code,
 brew install --cask betoxf/tap/usagebar
 ```
 
-Upgrade later with `brew update && brew upgrade --cask usagebar`.
+Usagebar opens by itself when the install finishes. Look for it in the menu bar.
+
+### Install with your coding agent
+
+Run the command for your tool and approve the `brew` step when it asks. Each one starts the agent with the same request.
+
+**Claude Code**
+
+```bash
+claude "Install Usagebar on this Mac: run brew install --cask betoxf/tap/usagebar (brew upgrade --cask usagebar if it is already installed) and check that it is running. If Homebrew is missing, ask me first."
+```
+
+**Codex**
+
+```bash
+codex "Install Usagebar on this Mac: run brew install --cask betoxf/tap/usagebar (brew upgrade --cask usagebar if it is already installed) and check that it is running. If Homebrew is missing, ask me first."
+```
+
+**Cursor**
+
+```bash
+cursor-agent "Install Usagebar on this Mac: run brew install --cask betoxf/tap/usagebar (brew upgrade --cask usagebar if it is already installed) and check that it is running. If Homebrew is missing, ask me first."
+```
+
+<details>
+<summary><strong>Gemini CLI, Grok Build, OpenCode, and Droid</strong></summary>
+
+**Gemini CLI**
+
+```bash
+gemini "Install Usagebar on this Mac: run brew install --cask betoxf/tap/usagebar (brew upgrade --cask usagebar if it is already installed) and check that it is running. If Homebrew is missing, ask me first."
+```
+
+**Grok Build**
+
+```bash
+grok "Install Usagebar on this Mac: run brew install --cask betoxf/tap/usagebar (brew upgrade --cask usagebar if it is already installed) and check that it is running. If Homebrew is missing, ask me first."
+```
+
+**OpenCode**
+
+```bash
+opencode --prompt "Install Usagebar on this Mac: run brew install --cask betoxf/tap/usagebar (brew upgrade --cask usagebar if it is already installed) and check that it is running. If Homebrew is missing, ask me first."
+```
+
+**Droid**
+
+```bash
+droid "Install Usagebar on this Mac: run brew install --cask betoxf/tap/usagebar (brew upgrade --cask usagebar if it is already installed) and check that it is running. If Homebrew is missing, ask me first."
+```
+
+</details>
+
+**Kimi Code, ZCode, or any other agent:** paste this into a new chat.
+
+```text
+Install Usagebar on this Mac: run brew install --cask betoxf/tap/usagebar (brew upgrade --cask usagebar if it is already installed) and check that it is running. If Homebrew is missing, ask me first.
+```
 
 ### Download a release
 
@@ -75,7 +121,17 @@ Download `Usagebar.zip` from the [latest release](https://github.com/betoxf/Usag
 3. Otherwise the setup window opens. Click **Sign In** next to each tool you use and it shows **Connected** on its own when you finish. To open it again, click **Usagebar Setup** in the menu bar, or choose **Connect More Tools…** under the panel's **⋯** button.
 4. Right-click the menu-bar item to open the usage panel. Left-click switches providers. Settings are under the panel's **⋯** button.
 
-Without the Claude CLI, **Sign In** uses an in-app browser session instead.
+### Connect your tools
+
+The setup window runs these for you. You can also run them yourself, then click **Refresh** in Usagebar.
+
+| Tool | Terminal sign-in | Without the CLI |
+| --- | --- | --- |
+| Claude Code | `claude auth login` | **Sign In** uses an in-app claude.ai session. |
+| Codex | `codex login` | **Get Codex** opens the download page. |
+| Cursor | `cursor-agent login` | **Get Cursor CLI** opens the download page. Recent Cursor apps encrypt their sign-in, so Usagebar reads the CLI's. |
+| Kimi Code | `kimi login` | **Add Key** saves a Kimi Code API key or `kimi-auth` web token. |
+| z.ai | None | **Add Key** saves your API key. Usagebar also reads `Z_AI_API_KEY` or `~/.zai/config.json` with `{"apiKey": "..."}`. |
 
 ### If Claude shows "Session expired" or authentication fails
 
@@ -87,16 +143,6 @@ Re-authenticate from the terminal — this is the reliable fix:
 
 Usagebar reads the credentials Claude Code writes locally and never rotates
 them itself, so a fresh terminal login is always picked up automatically.
-
-Cursor is discovered from the Cursor.app or Cursor Agent CLI login (no extra
-setup). z.ai appears when a `Z_AI_API_KEY` is configured (environment variable or
-`~/.zai/config.json` with `{"apiKey": "..."}`).
-
-Kimi Code is discovered from `~/.kimi-code/credentials/kimi-code.json` after
-`kimi login`. Usagebar uses the same Kimi Code usage source as CodexBar and
-shows the weekly quota plus the rolling five-hour window. Without the CLI, the
-setup window's **Add Key** button saves a Kimi Code API key or `kimi-auth` web
-token.
 
 ### Fewer menu-bar icons
 
@@ -121,6 +167,56 @@ Right-click the status item to open the usage panel; its **⋯** button holds th
 | Switch cadence | Rotate providers automatically or switch manually with a left click. |
 | Launch at Login | Register or remove Usagebar as a macOS login item. |
 | Sign out | Reset the selected provider's Usagebar state; provider CLI sessions remain provider-owned. |
+| Updates | Check for a new version, or turn **Update Automatically** on or off. |
+
+## Update and uninstall
+
+Homebrew installs update themselves unless you turn off **Update Automatically** under the panel's **⋯** button. To update from the terminal:
+
+```bash
+brew update && brew upgrade --cask usagebar
+```
+
+A copy installed from the zip can't update itself, so repeat the [download steps](#download-a-release) or reinstall with Homebrew.
+
+To remove Usagebar:
+
+```bash
+brew uninstall --cask usagebar
+```
+
+To also delete its settings and caches:
+
+```bash
+brew uninstall --cask --zap usagebar
+```
+
+If you installed from the zip, quit Usagebar and delete `/Applications/Usagebar.app`. Your sign-ins for Claude Code, Codex, and the other CLIs stay as they are.
+
+## For AI agents
+
+If someone asks you to install Usagebar:
+
+1. Check that `sw_vers -productVersion` is 14 or newer. Usagebar runs only on macOS.
+2. Run `brew install --cask betoxf/tap/usagebar`, or `brew upgrade --cask usagebar` if it is already installed. If `brew` is missing, ask before installing Homebrew, or offer the [release zip](#download-a-release).
+3. Run `pgrep -x Usagebar` to confirm it is running. If it isn't, run `open -a Usagebar`.
+4. Tell them to look for Usagebar in the menu bar. If it shows **Setup**, the setup window connects their tools.
+
+Don't use `sudo`, read credential files, or ask for API keys or tokens. Usagebar finds existing sign-ins on its own, and the commands in [Connect your tools](#connect-your-tools) are interactive, so leave them to the person. Usagebar has no command-line interface or API: usage appears only in its menu-bar item and panel.
+
+## Why Usagebar
+
+Usage limits matter most while you are working. Usagebar keeps your Claude Code, Codex, and Cursor limits (the weekly allowance, plus the current five-hour window on plans that have one) visible in the menu bar, then gets out of the way. Right-click it for a panel with every provider, a meter for each limit, and its reset time.
+
+| Capability | What it gives you |
+| --- | --- |
+| Multiple providers | Track Claude, Codex, Kimi Code, Cursor, and z.ai from one status item. |
+| At-a-glance limits | See rolling-window and weekly percentages without opening a browser. |
+| Focus-aware switching | Show the provider of the AI tool you used last: the Claude, ChatGPT/Codex, Cursor or Grok Bot, Kimi Code, or ZCode app, or the Claude Code, Codex, Cursor, or Kimi CLI running in your terminal. |
+| Usage panel | One card per provider with its plan, a meter per limit, and the time until it resets. Click a card to show that provider in the menu bar. |
+| Local credential discovery | Reuse the Claude Code, Codex, Cursor, Kimi Code, and z.ai sign-ins already on the Mac. No API keys to paste. |
+| Privacy-first operation | No Usagebar account, telemetry, analytics, or intermediary backend. |
+| Lightweight runtime | A native Swift menu-bar app with no web runtime or bundled service. |
 
 ## FAQ
 
@@ -217,7 +313,7 @@ Issues and focused pull requests are welcome. Start with [CONTRIBUTING.md](CONTR
 
 Usagebar is an independent open-source project. It is not affiliated with, endorsed by, or sponsored by Anthropic, OpenAI, Anysphere (Cursor), Moonshot AI (Kimi), Z.ai, xAI, or any other provider it works with.
 
-Claude, Codex, Cursor, Kimi, z.ai, Grok, and their logos are trademarks of their respective owners. Usagebar uses them only to identify the service whose usage it shows.
+Claude, Codex, Cursor, Kimi, z.ai, Grok, Gemini, OpenCode, Droid, and their logos are trademarks of their respective owners. Usagebar uses them only to identify each service.
 
 ## License
 

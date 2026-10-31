@@ -35,17 +35,34 @@ extension AppDelegate {
             viewModel.useRenderingFixtures(providers)
             menuWillOpen(menu)
             if providers.isEmpty {
-                precondition(menu.items.contains { $0.title == "Setup Usage Tracking" })
+                precondition(menu.items.contains { $0.title == "Set Up Usagebar…" })
             } else {
                 precondition(menu.items.contains { $0.title == "Refresh" })
                 let updates = menu.items.first { $0.title == "Last Updates" }?.submenu
                 precondition(updates?.numberOfItems == providers.count)
+                precondition(menu.items.contains { $0.title == "Connect More Tools…" })
             }
             menuDidClose(menu)
             let firstItem = menu.items.first
             rebuildMenu()
             precondition(menu.items.first === firstItem, "Closed menu rebuilt")
         }
+
+        viewModel.useRenderingFixtures([])
+        showSetupStatus()
+        precondition(statusItem.button?.image?.isTemplate == true, "Setup status ignored the menu bar's appearance")
+        precondition(ProviderSignIn.terminal(executable: "/a b/it's", arguments: ["login"]).command == "'/a b/it'\\''s' 'login'",
+                     "Login command was not quoted for the shell")
+        verifySetupModel()
+        statusBarButtonClicked()
+        precondition(setupWindow?.isVisible == true, "A click with nothing connected did not open setup")
+        setupWindow?.close()
+        precondition(setupWindow == nil, "Closing setup left it watching for sign-ins")
+        if let output {
+            try renderSetup(to: output)
+        }
+
+        verifyPlanNames()
 
         viewModel.useRenderingFixtures([.claude, .codex])
         let sheet = NSImage(size: NSSize(width: 560, height: 240))
@@ -153,6 +170,72 @@ extension AppDelegate {
             try png.write(to: output)
         }
     }
+
+    private func verifyPlanNames() {
+        func plan(_ type: String?, _ tier: String?) -> String? {
+            ClaudeOAuthService.OAuthCredentials(accessToken: "", scopes: [], subscriptionType: type, rateLimitTier: tier).planName
+        }
+        precondition(plan("max", "default_claude_max_20x") == "Ultra", "Claude's 20x tier was not shown as Ultra")
+        precondition(plan("max", "default_claude_max_5x") == "Max" && plan("max", nil) == "Max", "Claude's Max plan was misread")
+        precondition(plan("ultra", nil) == "Ultra", "A stored Ultra plan was misread")
+        precondition(plan("pro", nil) == "Pro" && plan("team", "default_claude_max_5x") == "Team", "Claude's plan was misread")
+        precondition(plan(nil, "default_claude_max_5x") == nil, "A tier without a plan was shown")
+
+        precondition(displayPlanName("pro_plus") == "Pro Plus", "A plan id was left unreadable")
+        precondition(displayPlanName("GLM Coding Pro") == "GLM Coding Pro", "A readable plan name was changed")
+        var codex = CodexUsageData()
+        precondition(codex.planName.isEmpty, "An unknown Codex plan was shown")
+        codex.planType = "prolite"
+        precondition(codex.planName == "Pro Lite", "Codex's plan read as one word")
+
+        viewModel.useRenderingFixtures([.claude])
+        viewModel.usageData.planName = "Ultra"
+        precondition(panelCards().first { $0.provider == .claude }?.detail == "Ultra", "Claude's card hid its plan")
+        viewModel.usageData.planName = nil
+        precondition(panelCards().first { $0.provider == .claude }?.detail == "via OAuth", "Claude's card lost its fallback")
+    }
+
+    private func verifySetupModel() {
+        let model = SetupModel()
+        let start = Date()
+        _ = model.update(available: [], now: start)
+        precondition(model.signIns.count == SetupModel.providers.count, "A provider had no way to connect")
+        precondition(!SetupModel.providers.contains(.xai), "Grok got a second row beside Cursor")
+        model.startConnecting(.claude)
+        model.startConnecting(.codex)
+        precondition(model.update(available: [.claude], now: start) == [.claude], "A finished sign-in was missed")
+        precondition(model.connecting.keys.contains(.codex) && model.signIns[.claude] == nil, "Row states drifted")
+        precondition(model.update(available: [.claude], now: start.addingTimeInterval(601)).isEmpty, "A timeout counted as a sign-in")
+        precondition(model.connecting.isEmpty, "An abandoned sign-in was watched forever")
+    }
+
+    /// Saves the setup window beside the status preview, signed out and connected.
+    private func renderSetup(to output: URL) throws {
+        if let tiff = statusItem.button?.image?.tiffRepresentation {
+            try NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:])?
+                .write(to: output.deletingPathExtension().appendingPathExtension("setup-status.png"))
+        }
+        loadProviderMarks()
+        setupModel.cursorMarks = panelModel.cursorMarks
+        setupModel.zcodeMark = panelModel.zcodeMark
+        _ = setupModel.update(available: [])
+        for (name, providers, appearance) in [
+            ("setup-light", Set<DisplayProvider>(), NSAppearance.Name.aqua),
+            ("setup-dark", [.claude], .darkAqua)
+        ] {
+            viewModel.useRenderingFixtures(providers)
+            let view = NSHostingView(rootView: SetupView(viewModel: viewModel, model: setupModel)
+                .background(Color(nsColor: .windowBackgroundColor)))
+            view.appearance = NSAppearance(named: appearance)
+            view.frame = NSRect(origin: .zero, size: view.fittingSize)
+            view.layoutSubtreeIfNeeded()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+            guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
+            view.cacheDisplay(in: view.bounds, to: bitmap)
+            let url = output.deletingPathExtension().appendingPathExtension("\(name).png")
+            try bitmap.representation(using: .png, properties: [:])?.write(to: url)
+        }
+    }
 }
 
 @main
@@ -170,6 +253,6 @@ struct StatusRenderingTests {
         let model = UsageViewModel(startAutomatically: false)
         let output = ProcessInfo.processInfo.environment["USAGEBAR_RENDER_OUTPUT"].map { URL(fileURLWithPath: $0) }
         try AppDelegate(viewModel: model).verifyRendering(output: output)
-        print("PASS: setup/Claude/Codex menus, closed-menu reuse, status image caching, light/dark rendering, Claude without a 5-hour window, focus following, shared Cursor plan")
+        print("PASS: plan names, setup status and model, setup/Claude/Codex menus, closed-menu reuse, status image caching, light/dark rendering, Claude without a 5-hour window, focus following, shared Cursor plan")
     }
 }

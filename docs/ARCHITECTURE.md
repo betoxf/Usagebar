@@ -28,6 +28,8 @@ flowchart LR
 | `JustaUsageBarApp` | SwiftUI entry point and settings scene. |
 | `AppDelegate` | Creates the `NSStatusItem`, the usage panel and settings menu, provider images, switching, focus following, and release checks. |
 | `UsagePanelView` | The panel a right click opens: one card per provider with its mark, plan, meters, and reset times. Clicking a card shows that provider in the menu bar; the ⋯ button opens the settings menu. |
+| `SetupView` | The setup window: one row per tool, opened on first launch when nothing is signed in, or from the status item. While it is open, `checkForNewSignIns` looks for sign-ins every three seconds, only while someone is connecting a provider or the window is key. A click skips the discovery cache for that provider alone, for at most ten minutes. |
+| `ProviderSignIn` | Picks each provider's easiest connection: its CLI's login in Terminal, the claude.ai browser session, a key, or a download page. It reads no credentials. |
 | `UsageViewModel` | UI state, cached credential availability, per-provider refresh scheduling, power-state handling, and launch at login. |
 | `ProviderActor` | Serializes provider and credential storage work away from the UI actor. |
 | `UsageRefreshPolicy` | Provider selection, refresh cadence, retry deadlines, and Retry-After parsing. |
@@ -63,7 +65,7 @@ The browser login view owns a cancellable repeating timer. Dismantling the view 
 
 ## Focus following
 
-With Follow Active App on, the frontmost application selects the provider: Claude, ChatGPT or Codex, Cursor and Grok Bot (Cursor's agent app, on the same subscription), KimiCode, ZCode (z.ai), and Grok map by bundle identifier or name. When Grok Bot is signed in to the same Cursor account, the menu titles the Cursor section "Cursor & Grok Bot"; Usagebar compares only the hashed account keys in Grok Bot's `sand-secrets.json`, never its tokens. When Grok's billing reports unified billing and Cursor is signed in, Grok draws on the Cursor plan: the Cursor entry, whose marks include xAI and Grok, stands for both, and Grok in front selects it. Any other application, including a terminal whose CLI has ended, leaves the last provider on screen and lets rotation resume; a manual click overrides it until the next AI app or CLI comes to the front.
+With Follow Active App on, the frontmost application selects the provider: Claude, ChatGPT or Codex, Cursor and Grok Bot (Cursor's agent app, on the same subscription), Kimi Code, ZCode (z.ai), and Grok map by bundle identifier or name. When Grok Bot is signed in to the same Cursor account, the menu titles the Cursor section "Cursor & Grok Bot"; Usagebar compares only the hashed account keys in Grok Bot's `sand-secrets.json`, never its tokens. When Grok's billing reports unified billing and Cursor is signed in, Grok draws on the Cursor plan: the Cursor entry, whose marks include xAI and Grok, stands for both, and Grok in front selects it. Any other application, including a terminal whose CLI has ended, leaves the last provider on screen and lets rotation resume; a manual click overrides it until the next AI app or CLI comes to the front.
 
 An application that is not mapped is checked for terminal sessions. `TerminalAgentDetector` lists pseudo-terminals by last input time, which is how `w` measures idle time, and reads the foreground processes of the most recently used session that the application hosts. A session with another application bundle among its ancestors belongs to that application; sessions under a detached server such as tmux or iTermServer count for any application that hosts a terminal. The launch path and arguments identify Claude Code, Codex, Cursor Agent, Kimi, and Grok. For Claude Code, `ANTHROPIC_BASE_URL` in the process environment selects z.ai or Kimi when it points at their gateway, and no provider when it points at another one.
 
@@ -71,7 +73,7 @@ The check runs when an application comes to the front and repeats off the main t
 
 ## Credential discovery
 
-Claude priority is: Usagebar's encrypted OAuth mirror, `~/.claude/.credentials.json`, the `Claude Code-credentials` Keychain item through `/usr/bin/security`, direct Keychain lookup, then the Usagebar-managed browser session fallback.
+Claude priority is: Usagebar's encrypted OAuth mirror, `~/.claude/.credentials.json`, the `Claude Code-credentials` Keychain item through `/usr/bin/security`, direct Keychain lookup, then the Usagebar-managed browser session fallback. The plan on Claude's card comes from `subscriptionType` and `rateLimitTier` in those credentials. A mirror saved before Usagebar kept them has no plan, so the Keychain is read once per launch to fill it in.
 
 Codex reads `${CODEX_HOME}/auth.json` or `~/.codex/auth.json`. It reads `chatgpt_base_url` from `${CODEX_HOME}/config.toml` when present and otherwise uses `https://chatgpt.com`.
 
@@ -107,6 +109,7 @@ A configured Codex base URL changes the Codex usage destination. Provider-privat
 | --- | --- |
 | Display preferences | `UserDefaults` through `@AppStorage` |
 | Launch at login | `SMAppService.mainApp` |
+| Terminal sign-in | A `.command` file in the temporary directory that holds only the provider's login command and deletes itself when it finishes. |
 | Claude browser-session data, OAuth mirror, and optional Kimi credential | `~/Library/Application Support/JustaUsageBar/credentials.enc` |
 | Provider CLI credentials | Provider-owned files or Keychain items; Kimi OAuth tokens may be refreshed in place, while other provider credentials are read only |
 

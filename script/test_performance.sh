@@ -41,6 +41,7 @@ xcrun swiftc -swift-version 5 -default-isolation MainActor -parse-as-library -O 
   "$ROOT_DIR/JustaUsageBar/Views/AuthWebView.swift" \
   "$ROOT_DIR/JustaUsageBar/Views/PopoverView.swift" \
   "$ROOT_DIR/JustaUsageBar/Views/SettingsView.swift" \
+  "$ROOT_DIR/JustaUsageBar/Views/SetupView.swift" \
   "$ROOT_DIR/JustaUsageBar/Views/UsagePanelView.swift" \
   "$ROOT_DIR/Tests/TerminalStandIn.swift" \
   "$TEST_DIR/RenderingTests.swift" \

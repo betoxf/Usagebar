@@ -22,9 +22,9 @@ struct UsagePanelCard: Identifiable {
     let provider: DisplayProvider
     let detail: String
     let rows: [UsagePanelRow]
-    /// An error or "Not authenticated", shown under the rows.
+    /// An error or "Not connected", shown under the rows.
     var message: String?
-    /// A button under the message, e.g. "How to authenticate Claude".
+    /// A button under the message, e.g. "Connect Claude".
     var actionTitle: String?
     var id: DisplayProvider { provider }
 }
@@ -49,7 +49,6 @@ final class UsagePanelModel: ObservableObject {
     var onMore: (NSView) -> Void = { _ in }
     var onUpdate: () -> Void = {}
     var onSetup: () -> Void = {}
-    var onSetUpKimi: () -> Void = {}
     var onQuit: () -> Void = {}
 }
 
@@ -103,16 +102,13 @@ struct UsagePanelView: View {
 
     private var setup: some View {
         VStack(spacing: 8) {
-            Text("No providers signed in").fontWeight(.semibold)
-            Text("Sign in to Claude Code, Codex, Cursor, Kimi Code, z.ai, or Grok on this Mac and Usagebar picks it up.")
+            Text("Welcome to Usagebar").fontWeight(.semibold)
+            Text("Connect the AI tools you use to see your limits here.")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-            HStack {
-                Button("Setup Usage Tracking") { model.onSetup() }
-                Button("Set Up KimiCode…") { model.onSetUpKimi() }
-            }
-            .controlSize(.small)
+            Button("Set Up Usagebar…") { model.onSetup() }
+                .buttonStyle(.borderedProminent)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 18)
@@ -150,7 +146,7 @@ private struct UsagePanelCardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 6) {
-                mark
+                ProviderMark(provider: card.provider, cursorMarks: model.cursorMarks, zcodeMark: model.zcodeMark)
                 if !card.detail.isEmpty {
                     Text(card.detail)
                         .font(.system(size: 12))
@@ -184,7 +180,7 @@ private struct UsagePanelCardView: View {
             }
 
             if let message = card.message {
-                // "Not authenticated" has no rows and isn't an error.
+                // "Not connected" has no rows and isn't an error.
                 Text(message)
                     .font(.system(size: 12))
                     .foregroundStyle(card.rows.isEmpty ? Color.secondary : Color(nsColor: .systemOrange))
@@ -212,46 +208,6 @@ private struct UsagePanelCardView: View {
         .help(isInMenuBar ? "Shown in the menu bar" : "Show in the menu bar")
     }
 
-    @ViewBuilder private var mark: some View {
-        switch card.provider {
-        case .claude:
-            HStack(spacing: 6) {
-                templateImage(NSImage(named: "ClaudeSpark"), height: 15)
-                    .foregroundStyle(Color(nsColor: .usagebarClaudeOrange))
-                Text("Claude").fontWeight(.semibold)
-            }
-        case .codex:
-            if let lockup = NSImage(named: "CodexLockup") {
-                templateImage(lockup, height: 16)
-            } else {
-                Text("Codex").fontWeight(.semibold)
-            }
-        case .cursor:
-            templateImage(model.cursorMarks, height: 12)
-        case .kimi:
-            Text("KimiCode")
-                .fontWeight(.semibold)
-                .foregroundStyle(Color(red: 0.10, green: 0.52, blue: 1.0))
-        case .zai:
-            HStack(spacing: 1.7) {
-                templateImage(model.zcodeMark, height: 10.6)
-                Text("Code").fontWeight(.semibold)
-            }
-        case .xai:
-            Text("XAI").fontWeight(.semibold)
-        }
-    }
-
-    @ViewBuilder private func templateImage(_ image: NSImage?, height: CGFloat) -> some View {
-        if let image, image.size.height > 0 {
-            Image(nsImage: image)
-                .renderingMode(.template)
-                .resizable()
-                .interpolation(.high)
-                .frame(width: height * image.size.width / image.size.height, height: height)
-        }
-    }
-
     private var meterColor: Color {
         card.provider == .claude ? Color(nsColor: .usagebarClaudeOrange) : .primary
     }
@@ -267,6 +223,59 @@ private struct UsagePanelCardView: View {
 
     private var stroke: Color {
         colorScheme == .dark ? Color.white.opacity(0.07) : Color.black.opacity(0.07)
+    }
+}
+
+/// A provider's mark, as the panel and the setup window show it.
+struct ProviderMark: View {
+    let provider: DisplayProvider
+    let cursorMarks: NSImage?
+    let zcodeMark: NSImage?
+
+    var body: some View {
+        switch provider {
+        case .claude:
+            HStack(spacing: 6) {
+                templateImage(NSImage(named: "ClaudeSpark"), height: 15)
+                    .foregroundStyle(Color(nsColor: .usagebarClaudeOrange))
+                Text("Claude").fontWeight(.semibold)
+            }
+        case .codex:
+            if let lockup = NSImage(named: "CodexLockup") {
+                templateImage(lockup, height: 16)
+            } else {
+                Text("Codex").fontWeight(.semibold)
+            }
+        case .cursor:
+            templateImage(cursorMarks, height: 12)
+        case .kimi:
+            if NSImage(named: "KimiCodeLogo") != nil {
+                Image("KimiCodeLogo")
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFit()
+                    .frame(height: 13)
+            } else {
+                Text("Kimi Code").fontWeight(.semibold)
+            }
+        case .zai:
+            HStack(spacing: 1.7) {
+                templateImage(zcodeMark, height: 10.6)
+                Text("Code").fontWeight(.semibold)
+            }
+        case .xai:
+            Text("XAI").fontWeight(.semibold)
+        }
+    }
+
+    @ViewBuilder private func templateImage(_ image: NSImage?, height: CGFloat) -> some View {
+        if let image, image.size.height > 0 {
+            Image(nsImage: image)
+                .renderingMode(.template)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: height * image.size.width / image.size.height, height: height)
+        }
     }
 }
 

@@ -7,7 +7,8 @@ import SwiftUI
 import AppKit
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWindowDelegate {
+    nonisolated private static let hasShownSetupDefaultsKey = "hasShownSetup"
     nonisolated private static let lastLaunchedAppDescriptorDefaultsKey = "lastLaunchedAppDescriptor"
     nonisolated private static let lastUpdateCheckAtDefaultsKey = "lastUpdateCheckAt"
     nonisolated private static let lastInstalledUpdateAtDefaultsKey = "lastInstalledUpdateAt"
@@ -56,7 +57,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         super.init()
     }
     private var lastStatusLength: CGFloat = 0
-    private var credentialsWindow: NSWindow?
+    private var setupWindow: NSWindow?
+    private let setupModel = SetupModel()
+    private let setupCheckTimer = RepeatingTimer()
     private let preferredProviderDefaultsKey = "preferredDisplayProvider"
 
     // Provider switching state
@@ -273,6 +276,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             updateStatusImage()
         } else {
             showSetupStatus()
+            showSetupOnFirstLaunch()
         }
         rebuildMenu()
         maybeCheckForUpdateInBackground()
@@ -341,52 +345,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         lastRenderKey = nil
         guard let button = statusItem.button else { return }
 
-        let width: CGFloat = 50
+        let width: CGFloat = 56
         let height: CGFloat = 22
 
         let image = NSImage(size: NSSize(width: width, height: height))
         image.lockFocus()
 
-        let isDarkMode: Bool = {
-            return button.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        }()
-
-        let anthropicOrange = NSColor(red: 0.83, green: 0.53, blue: 0.30, alpha: 1.0)
-        let textColor = isDarkMode ? NSColor.white : NSColor(white: 0.25, alpha: 1.0)
-
-        let starAttributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 7, weight: .bold),
-            .foregroundColor: anthropicOrange
-        ]
-        let starString = NSAttributedString(string: "\u{2733}\u{FE0E}", attributes: starAttributes)
-
-        let labelAttributes: [NSAttributedString.Key: Any] = [
+        let nameAttributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 7, weight: .medium),
-            .foregroundColor: textColor
+            .foregroundColor: NSColor.black
         ]
-        let labelString = NSAttributedString(string: "Claude", attributes: labelAttributes)
-
-        let totalLabelWidth = starString.size().width + 1 + labelString.size().width
-        let labelStartX = (width - totalLabelWidth) / 2
-
-        starString.draw(at: NSPoint(x: labelStartX, y: 12))
-        labelString.draw(at: NSPoint(x: labelStartX + starString.size().width + 1, y: 12))
+        let nameString = NSAttributedString(string: "Usagebar", attributes: nameAttributes)
+        let logoSize = NSSize(width: 17, height: 6)
+        let logoGap: CGFloat = 2
+        let startX = (width - logoSize.width - logoGap - nameString.size().width) / 2
+        NSImage(named: "UsagebarLogo")?.draw(in: NSRect(origin: NSPoint(x: startX, y: 13.5), size: logoSize))
+        nameString.draw(at: NSPoint(x: startX + logoSize.width + logoGap, y: 12))
 
         let setupAttributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 9, weight: .medium),
-            .foregroundColor: anthropicOrange
+            .foregroundColor: NSColor.black
         ]
         let setupString = NSAttributedString(string: "Setup", attributes: setupAttributes)
-        let setupX = (width - setupString.size().width) / 2
-        setupString.draw(at: NSPoint(x: setupX, y: 0))
+        setupString.draw(at: NSPoint(x: (width - setupString.size().width) / 2, y: 0))
 
         image.unlockFocus()
-        image.isTemplate = false
+        // A template follows the menu bar's appearance, which nothing redraws this for.
+        image.isTemplate = true
 
         lastStatusLength = width
         statusItem.length = width
         button.image = image
-        button.toolTip = nil
+        button.toolTip = "Set up Usagebar"
     }
 
     private func setupMenu() {
@@ -420,13 +410,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let hasKimi = viewModel.hasKimiCredentials
 
         if !hasClaude && !hasCodex && !hasCursor && !hasZai && !hasXai && !hasKimi {
-            let setupItem = NSMenuItem(title: "Setup Usage Tracking", action: #selector(showCredentialsWindow), keyEquivalent: "")
+            let setupItem = NSMenuItem(title: "Set Up Usagebar…", action: #selector(showSetupWindow), keyEquivalent: "")
             setupItem.target = self
             menu.addItem(setupItem)
-
-            let kimiSetupItem = NSMenuItem(title: "Set Up KimiCode…", action: #selector(authenticateKimi), keyEquivalent: "")
-            kimiSetupItem.target = self
-            menu.addItem(kimiSetupItem)
         } else {
             // Refresh
             let refreshItem = NSMenuItem(title: "Refresh", action: #selector(refreshData), keyEquivalent: "r")
@@ -439,7 +425,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 case .claude: "Claude"
                 case .codex: "Codex"
                 case .cursor: "Cursor"
-                case .kimi: "KimiCode"
+                case .kimi: "Kimi Code"
                 case .zai: "z.ai"
                 case .xai: "XAI"
                 }
@@ -496,7 +482,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 }
 
                 if hasKimi {
-                    let kimiToggle = NSMenuItem(title: "Show KimiCode", action: #selector(toggleShowKimi), keyEquivalent: "")
+                    let kimiToggle = NSMenuItem(title: "Show Kimi Code", action: #selector(toggleShowKimi), keyEquivalent: "")
                     kimiToggle.target = self
                     kimiToggle.state = viewModel.showKimi ? .on : .off
                     displayMenu.addItem(kimiToggle)
@@ -523,7 +509,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     let followItem = NSMenuItem(title: "Follow Active App", action: #selector(toggleFollowActiveApp), keyEquivalent: "")
                     followItem.target = self
                     followItem.state = viewModel.followActiveApp ? .on : .off
-                    followItem.toolTip = "Show the provider of the AI app or terminal CLI you used last (Claude, ChatGPT/Codex, Cursor or Grok Bot, KimiCode, ZCode, or Grok)"
+                    followItem.toolTip = "Show the provider of the AI app or terminal CLI you used last (Claude, ChatGPT/Codex, Cursor or Grok Bot, Kimi Code, ZCode, or Grok)"
                     displayMenu.addItem(followItem)
 
                     let intervalMenu = NSMenu()
@@ -584,13 +570,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
 
             if viewModel.hasSavedKimiCredential {
-                let forgetKimi = NSMenuItem(title: "Forget Saved KimiCode Credential", action: #selector(clearKimiCredential), keyEquivalent: "")
+                let forgetKimi = NSMenuItem(title: "Forget Saved Kimi Code Credential", action: #selector(clearKimiCredential), keyEquivalent: "")
                 forgetKimi.target = self
                 menu.addItem(forgetKimi)
-            } else if !hasKimi {
-                let setupKimi = NSMenuItem(title: "Set Up KimiCode…", action: #selector(authenticateKimi), keyEquivalent: "")
-                setupKimi.target = self
-                menu.addItem(setupKimi)
+            }
+
+            if !viewModel.availableProviders.isSuperset(of: SetupModel.providers) {
+                let connectItem = NSMenuItem(title: "Connect More Tools…", action: #selector(showSetupWindow), keyEquivalent: "")
+                connectItem.target = self
+                menu.addItem(connectItem)
             }
         }
 
@@ -658,15 +646,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         panelModel.updateVersion = availableUpdateVersion
         panelModel.isRefreshing = viewModel.isLoading
         panelModel.updatedText = updatedText(viewModel.lastUpdated)
-        if panelModel.cursorMarks == nil {
-            panelModel.cursorMarks = cursorPlanMarksImage(height: 12)
-            var transform = AffineTransform.identity
-            transform.scale(10.6)
-            let zMark = zcodeMarkPath()
-            zMark.transform(using: transform)
-            panelModel.zcodeMark = templateImage(size: NSSize(width: 1.13 * 10.6, height: 10.6), paths: [zMark])
-        }
+        loadProviderMarks()
         DispatchQueue.main.async { [weak self] in self?.panel.fitContent() }
+    }
+
+    private func loadProviderMarks() {
+        guard panelModel.cursorMarks == nil else { return }
+        panelModel.cursorMarks = cursorPlanMarksImage(height: 12)
+        var transform = AffineTransform.identity
+        transform.scale(10.6)
+        let zMark = zcodeMarkPath()
+        zMark.transform(using: transform)
+        panelModel.zcodeMark = templateImage(size: NSSize(width: 1.13 * 10.6, height: 10.6), paths: [zMark])
     }
 
     private func updatedText(_ date: Date?) -> String {
@@ -679,11 +670,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         var cards: [UsagePanelCard] = []
 
         if viewModel.showClaude {
-            let detail: String = switch viewModel.claudeAuthSource {
+            let source: String = switch viewModel.claudeAuthSource {
             case .oauth: "via OAuth"
             case .webSession: "via Browser"
             case .none: ""
             }
+            let detail = viewModel.usageData.planName ?? source
             if viewModel.hasClaudeCredentials {
                 let usage = viewModel.usageData
                 var rows: [UsagePanelRow] = []
@@ -702,14 +694,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             } else {
                 cards.append(UsagePanelCard(
                     provider: .claude, detail: detail, rows: [],
-                    message: "Not authenticated", actionTitle: "How to authenticate Claude"
+                    message: "Not connected", actionTitle: "Connect Claude"
                 ))
             }
         }
 
         if viewModel.showCodex {
             let codex = viewModel.codexUsageData
-            let detail = codex.planType != "unknown" ? codex.planType.capitalized : ""
+            let detail = codex.planName
             if viewModel.hasCodexCredentials {
                 var rows = [UsagePanelRow(
                     label: codex.primaryIsWeekly ? "7d" : codex.primaryWindowLabel,
@@ -727,7 +719,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             } else {
                 cards.append(UsagePanelCard(
                     provider: .codex, detail: detail, rows: [],
-                    message: "Not authenticated", actionTitle: "How to authenticate Codex"
+                    message: "Not connected", actionTitle: "Connect Codex"
                 ))
             }
         }
@@ -736,7 +728,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let cursor = viewModel.cursorUsageData
             cards.append(UsagePanelCard(
                 provider: .cursor,
-                detail: cursor.planName != "unknown" ? cursor.planName.capitalized : "",
+                detail: cursor.planName != "unknown" ? displayPlanName(cursor.planName) : "",
                 rows: [UsagePanelRow(label: cursor.windowLabel, percent: cursor.usedPercent, resetText: cursor.timeUntilReset)],
                 message: viewModel.cursorError
             ))
@@ -752,7 +744,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let error = viewModel.kimiError
             cards.append(UsagePanelCard(
                 provider: .kimi, detail: viewModel.kimiAuthSource.displayName, rows: rows,
-                message: error, actionTitle: error != nil ? "KimiCode Setup…" : nil
+                message: error, actionTitle: error != nil ? "Kimi Code Setup…" : nil
             ))
         }
 
@@ -760,7 +752,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let zai = viewModel.zaiUsageData
             cards.append(UsagePanelCard(
                 provider: .zai,
-                detail: zai.planName != "unknown" ? zai.planName.capitalized : "",
+                detail: zai.planName != "unknown" ? displayPlanName(zai.planName) : "",
                 rows: [UsagePanelRow(label: zai.windowLabel, percent: zai.usedPercent, resetText: zai.timeUntilReset)],
                 message: viewModel.zaiError
             ))
@@ -789,11 +781,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self.updatePanel()
         }
         panelModel.onAction = { [weak self] provider in
-            self?.panel.close()
+            guard let self else { return }
+            self.panel.close()
+            guard self.hasCredentials(for: provider) else {
+                self.showSetupWindow()
+                return
+            }
             switch provider {
-            case .claude: self?.authenticateClaude()
-            case .codex: self?.authenticateCodex()
-            case .kimi: self?.authenticateKimi()
+            case .claude: self.authenticateClaude()
+            case .codex: self.authenticateCodex()
+            case .kimi: self.authenticateKimi()
             case .cursor, .zai, .xai: break
             }
         }
@@ -808,11 +805,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         panelModel.onUpdate = { [weak self] in self?.checkForUpdates() }
         panelModel.onSetup = { [weak self] in
             self?.panel.close()
-            self?.showCredentialsWindow()
-        }
-        panelModel.onSetUpKimi = { [weak self] in
-            self?.panel.close()
-            self?.authenticateKimi()
+            self?.showSetupWindow()
         }
         panelModel.onQuit = { NSApp.terminate(nil) }
     }
@@ -823,6 +816,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Right click shows the usage panel
         if event?.type == .rightMouseUp {
             togglePanel()
+            return
+        }
+
+        // With nothing to show yet, the bar's only job is setup.
+        if !viewModel.hasCredentials {
+            showSetupWindow()
             return
         }
 
@@ -843,36 +842,97 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    @objc private func showCredentialsWindow() {
-        if credentialsWindow == nil {
-            let contentView = CredentialsView(onSave: { [weak self] sessionKey, orgId in
-                self?.viewModel.saveCredentials(sessionKey: sessionKey, organizationId: orgId)
-                self?.credentialsWindow?.close()
-                self?.credentialsWindow = nil
-                self?.updateStatusImage()
-                self?.startProviderAnimation()
-                self?.rebuildMenu()
-            })
+    private func showSetupOnFirstLaunch() {
+        guard viewModel.hasCheckedCredentials,
+              !UserDefaults.standard.bool(forKey: Self.hasShownSetupDefaultsKey) else { return }
+        showSetupWindow()
+    }
+
+    @objc private func showSetupWindow() {
+        UserDefaults.standard.set(true, forKey: Self.hasShownSetupDefaultsKey)
+        if setupWindow == nil {
+            loadProviderMarks()
+            setupModel.cursorMarks = panelModel.cursorMarks
+            setupModel.zcodeMark = panelModel.zcodeMark
+            setupModel.onConnect = { [weak self] in self?.connect($0) }
+            setupModel.onClose = { [weak self] in self?.setupWindow?.close() }
+            _ = setupModel.update(available: viewModel.availableProviders)
 
             let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 320, height: 420),
+                contentRect: .zero,
                 styleMask: [.titled, .closable, .fullSizeContentView],
                 backing: .buffered,
                 defer: false
             )
-            window.title = ""
+            window.title = "Set Up Usagebar"
+            window.titleVisibility = .hidden
             window.titlebarAppearsTransparent = true
-            window.standardWindowButton(.closeButton)?.isHidden = true
             window.standardWindowButton(.miniaturizeButton)?.isHidden = true
             window.standardWindowButton(.zoomButton)?.isHidden = true
-            window.contentView = NSHostingView(rootView: contentView)
-            window.center()
+            window.isMovableByWindowBackground = true
             window.isReleasedWhenClosed = false
-            credentialsWindow = window
+            window.delegate = self
+            window.contentView = NSHostingView(rootView: SetupView(viewModel: viewModel, model: setupModel))
+            window.setContentSize(window.contentView?.fittingSize ?? .zero)
+            window.center()
+            setupWindow = window
+            setupCheckTimer.start(every: 3) { [weak self] in self?.checkForSetupSignIns() }
         }
 
-        credentialsWindow?.makeKeyAndOrderFront(nil)
+        // No Dock icon leads back here, so it can't stay behind Terminal.
+        setupWindow?.makeKeyAndOrderFront(nil)
+        setupWindow?.orderFrontRegardless()
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Watches while someone is connecting a provider or looking at the window, so
+    /// a sign-in appears on its own and a forgotten window costs nothing.
+    private func checkForSetupSignIns() {
+        guard let setupWindow, setupWindow.isKeyWindow || !setupModel.connecting.isEmpty else { return }
+        let connecting = Set(setupModel.connecting.keys)
+        Task { [weak self] in
+            guard let self else { return }
+            await self.viewModel.checkForNewSignIns(connecting: connecting)
+            let finished = self.setupModel.update(available: self.viewModel.availableProviders)
+            if !finished.isEmpty {
+                self.showSetupWindow()
+            }
+        }
+    }
+
+    private func connect(_ provider: DisplayProvider) {
+        guard let signIn = setupModel.signIns[provider] else { return }
+        switch signIn {
+        case .terminal:
+            let name = provider.rawValue.capitalized
+            if signIn.runInTerminal(signingInTo: name) {
+                setupModel.startConnecting(provider)
+            } else {
+                presentAlert(
+                    title: "Couldn't Open Terminal",
+                    message: "Run this in Terminal to sign in to \(name):\n\n\(signIn.command ?? "")",
+                    style: .warning
+                )
+            }
+        case .claudeWebsite:
+            setupModel.isSigningInToClaude = true
+        case .kimiKey:
+            authenticateKimi()
+        case .zaiKey:
+            if authenticateZai() {
+                setupModel.startConnecting(provider)
+            }
+        case .download(_, let url):
+            NSWorkspace.shared.open(url)
+            setupModel.startConnecting(provider)
+        }
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        guard (notification.object as? NSWindow) === setupWindow else { return }
+        setupCheckTimer.stop()
+        setupModel.reset()
+        setupWindow = nil
     }
 
     @objc private func refreshData() {
@@ -893,10 +953,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         """
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
-        alert.addButton(withTitle: "Manual Setup…")
+        alert.addButton(withTitle: "Sign In with Browser…")
         NSApp.activate(ignoringOtherApps: true)
         if alert.runModal() == .alertSecondButtonReturn {
-            showCredentialsWindow()
+            showSetupWindow()
+            setupModel.isSigningInToClaude = true
         }
     }
 
@@ -910,7 +971,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func authenticateKimi() {
         let alert = NSAlert()
-        alert.messageText = "Set Up KimiCode"
+        alert.messageText = "Set Up Kimi Code"
         alert.informativeText = """
         Run `kimi login` in Terminal, then click Refresh in Usagebar.
 
@@ -919,7 +980,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
         alert.addButton(withTitle: "Paste Credential…")
-        alert.addButton(withTitle: "Open KimiCode Console")
+        alert.addButton(withTitle: "Open Kimi Code Console")
         NSApp.activate(ignoringOtherApps: true)
 
         switch alert.runModal() {
@@ -934,9 +995,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    /// z.ai has no sign-in, so the key goes where Usagebar already looks for it.
+    /// Returns whether the key page was opened.
+    private func authenticateZai() -> Bool {
+        let alert = NSAlert()
+        alert.messageText = "Connect z.ai"
+        alert.informativeText = """
+        Create an API key on z.ai, then save it in `~/.zai/config.json` like this:
+
+        {"apiKey": "your-key"}
+        """
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "Open z.ai API Keys")
+        alert.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+
+        guard alert.runModal() == .alertFirstButtonReturn,
+              let url = URL(string: "https://z.ai/manage-apikey/apikey-list") else { return false }
+        NSWorkspace.shared.open(url)
+        return true
+    }
+
     private func showKimiCredentialPrompt() {
         let alert = NSAlert()
-        alert.messageText = "KimiCode Credential"
+        alert.messageText = "Kimi Code Credential"
         alert.informativeText = "Paste a Kimi Code API key or the `kimi-auth` token from the Kimi Code console. It is encrypted locally."
         alert.alertStyle = .informational
         alert.addButton(withTitle: "Save")
@@ -2140,7 +2222,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    // MARK: - KimiCode Image
+    // MARK: - Kimi Code Image
 
     private func createKimiImage() -> (NSImage, CGFloat) {
         let showIcon = viewModel.showIcon
@@ -2164,7 +2246,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 .font: NSFont.systemFont(ofSize: 7, weight: .semibold),
                 .foregroundColor: textColor
             ]
-            let labelString = NSAttributedString(string: " KimiCode", attributes: labelAttributes)
+            let labelString = NSAttributedString(string: " Kimi Code", attributes: labelAttributes)
             let totalWidth = glyphSize + labelString.size().width
             let startX = (width - totalWidth) / 2
 
@@ -2465,7 +2547,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private var brandKimiColor: NSColor {
-        NSColor(red: 0.10, green: 0.52, blue: 1.0, alpha: 1.0)
+        NSColor(red: 0.04, green: 0.48, blue: 1.0, alpha: 1.0)
     }
 
     private var brandZaiColor: NSColor {
@@ -2500,179 +2582,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return button.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         }
         return NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-    }
-}
-
-// MARK: - Credentials View (for setup window)
-
-struct CredentialsView: View {
-    let onSave: (String, String) -> Void
-    @ObservedObject private var viewModel = UsageViewModel.shared
-
-    @State private var showManualEntry = false
-    @State private var sessionKey = ""
-    @State private var organizationId = ""
-
-    private let anthropicOrange = Color(red: 0.83, green: 0.53, blue: 0.30)
-
-    var body: some View {
-        VStack(spacing: 16) {
-            // Header
-            HStack(spacing: 4) {
-                Text("\u{2733}\u{FE0E}")
-                    .foregroundColor(anthropicOrange)
-                    .font(.title2)
-                Text("Claude Usage")
-                    .font(.headline)
-            }
-            .padding(.top, 8)
-
-            // Auto-detected status
-            VStack(spacing: 8) {
-                if viewModel.hasClaudeCredentials {
-                    HStack {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.green)
-                        Text("Claude detected")
-                            .font(.caption)
-                        Spacer()
-                    }
-                    .padding(.horizontal)
-                }
-
-                if viewModel.hasCodexCredentials {
-                    HStack {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.green)
-                        Text("Codex detected")
-                            .font(.caption)
-                        Spacer()
-                    }
-                    .padding(.horizontal)
-                }
-            }
-
-            if viewModel.hasClaudeCredentials || viewModel.hasCodexCredentials {
-                VStack(spacing: 10) {
-                    if viewModel.hasClaudeCredentials {
-                        Button(action: {
-                            onSave("__oauth__", "__oauth__")
-                        }) {
-                            HStack {
-                                Image(systemName: "sparkles")
-                                Text("Use Claude Detected Credentials")
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 10)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(anthropicOrange)
-                    }
-
-                    if viewModel.hasCodexCredentials {
-                        Button(action: {
-                            onSave("__detected_codex__", "__detected_codex__")
-                        }) {
-                            HStack {
-                                Image(systemName: "terminal")
-                                Text("Use Codex Detected Credentials")
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 10)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(anthropicOrange)
-                    }
-                }
-
-                Divider()
-                    .padding(.vertical, 4)
-            }
-
-            if !showManualEntry {
-                Spacer()
-                VStack(spacing: 16) {
-                    Text("Manual Claude setup")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-
-                    Divider()
-                        .padding(.vertical, 4)
-
-                    Button(action: { showManualEntry = true }) {
-                        HStack {
-                            Image(systemName: "keyboard")
-                            Text("Manual Entry")
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                    }
-                    .buttonStyle(.bordered)
-
-                    Text("For advanced users")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                }
-                Spacer()
-            } else {
-                // Manual entry form
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Manual Credential Entry")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Organization ID")
-                            .font(.caption)
-                            .fontWeight(.medium)
-                        Text("From URL: claude.ai/chat \u{2192} copy UUID after /organizations/")
-                            .font(.system(size: 9))
-                            .foregroundColor(.secondary)
-                        TextField("263e9fcb-52b9-4372-8842-...", text: $organizationId)
-                            .textFieldStyle(.roundedBorder)
-                    }
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Session Key")
-                            .font(.caption)
-                            .fontWeight(.medium)
-                        Text("From DevTools \u{2192} Application \u{2192} Cookies \u{2192} sessionKey")
-                            .font(.system(size: 9))
-                            .foregroundColor(.secondary)
-                        SecureField("sk-ant-sid01-...", text: $sessionKey)
-                            .textFieldStyle(.roundedBorder)
-                    }
-
-                    HStack {
-                        Button("\u{2190} Back") {
-                            showManualEntry = false
-                        }
-                        .buttonStyle(.plain)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-
-                        Spacer()
-
-                        Button("Save") {
-                            onSave(sessionKey.trimmingCharacters(in: .whitespacesAndNewlines),
-                                   organizationId.trimmingCharacters(in: .whitespacesAndNewlines))
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(anthropicOrange)
-                        .disabled(sessionKey.isEmpty || organizationId.isEmpty)
-                    }
-                }
-            }
-
-            Spacer()
-
-            Text("Not affiliated with Anthropic or OpenAI.\nCredentials stored locally (encrypted).")
-                .font(.caption2)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding()
-        .frame(width: 300, height: 400)
     }
 }

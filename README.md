@@ -37,9 +37,9 @@ Usage limits matter most while you are working. Usagebar keeps your Claude Code,
 
 | Capability | What it gives you |
 | --- | --- |
-| Multiple providers | Track Claude, Codex, KimiCode, Cursor, z.ai, and XAI (Grok Build) from one status item. |
+| Multiple providers | Track Claude, Codex, Kimi Code, Cursor, z.ai, and XAI (Grok Build) from one status item. |
 | At-a-glance limits | See rolling-window and weekly percentages without opening a browser. |
-| Focus-aware switching | Show the provider of the AI tool you used last: the Claude, ChatGPT/Codex, Cursor or Grok Bot, KimiCode, ZCode, or Grok app, or the Claude Code, Codex, Cursor, Kimi, or Grok CLI running in your terminal. |
+| Focus-aware switching | Show the provider of the AI tool you used last: the Claude, ChatGPT/Codex, Cursor or Grok Bot, Kimi Code, ZCode, or Grok app, or the Claude Code, Codex, Cursor, Kimi, or Grok CLI running in your terminal. |
 | Usage panel | One card per provider with its plan, a meter per limit, and the time until it resets. Click a card to show that provider in the menu bar. |
 | Local credential discovery | Reuse the Claude Code, Codex, Cursor, Kimi Code, z.ai, and Grok sign-ins already on the Mac. No API keys to paste. |
 | Privacy-first operation | No Usagebar account, telemetry, analytics, or intermediary backend. |
@@ -72,17 +72,10 @@ Download `Usagebar.zip` from the [latest release](https://github.com/betoxf/Usag
 
 1. Install and launch Usagebar.
 2. If you already use the provider CLIs, Usagebar discovers their local credentials automatically.
-3. Right-click the menu-bar item to open the usage panel. Left-click switches providers. Settings are under the panel's **⋯** button.
+3. Otherwise the setup window opens. Click **Sign In** next to each tool you use and it shows **Connected** on its own when you finish. To open it again, click **Usagebar Setup** in the menu bar, or choose **Connect More Tools…** under the panel's **⋯** button.
+4. Right-click the menu-bar item to open the usage panel. Left-click switches providers. Settings are under the panel's **⋯** button.
 
-If a provider is not detected, authenticate its CLI and ask Usagebar to rediscover credentials:
-
-```bash
-claude login
-codex login
-kimi login
-```
-
-Claude also supports an in-app browser-session fallback from **Setup Usage Tracking**.
+Without the Claude CLI, **Sign In** uses an in-app browser session instead.
 
 ### If Claude shows "Session expired" or authentication fails
 
@@ -99,10 +92,11 @@ Cursor is discovered from the Cursor.app or Cursor Agent CLI login (no extra
 setup). z.ai appears when a `Z_AI_API_KEY` is configured (environment variable or
 `~/.zai/config.json` with `{"apiKey": "..."}`).
 
-KimiCode is discovered from `~/.kimi-code/credentials/kimi-code.json` after
+Kimi Code is discovered from `~/.kimi-code/credentials/kimi-code.json` after
 `kimi login`. Usagebar uses the same Kimi Code usage source as CodexBar and
-shows the weekly quota plus the rolling five-hour window. A Kimi Code API key
-or `kimi-auth` web token can also be saved from **Set Up KimiCode…**.
+shows the weekly quota plus the rolling five-hour window. Without the CLI, the
+setup window's **Add Key** button saves a Kimi Code API key or `kimi-auth` web
+token.
 
 ### Fewer menu-bar icons
 
@@ -219,7 +213,11 @@ Issues and focused pull requests are welcome. Start with [CONTRIBUTING.md](CONTR
 - OpenAI for Codex
 - Moonshot AI for Kimi and Kimi Code
 
-Usagebar is an independent open-source project and is not affiliated with, endorsed by, or sponsored by these providers.
+## Not affiliated with any provider
+
+Usagebar is an independent open-source project. It is not affiliated with, endorsed by, or sponsored by Anthropic, OpenAI, Anysphere (Cursor), Moonshot AI (Kimi), Z.ai, xAI, or any other provider it works with.
+
+Claude, Codex, Cursor, Kimi, z.ai, Grok, and their logos are trademarks of their respective owners. Usagebar uses them only to identify the service whose usage it shows.
 
 ## License
 

@@ -238,7 +238,7 @@ final class ZaiAPIService {
 
         var usage = ZaiUsageData()
 
-        for key in ["planName", "plan", "plan_type", "packageName"] {
+        for key in ["planName", "plan", "plan_type", "packageName", "level"] {
             if let name = (body[key] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
                 usage.planName = name
                 break

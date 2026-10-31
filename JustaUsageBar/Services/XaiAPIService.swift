@@ -400,8 +400,6 @@ final class XaiAPIService {
             ?? stringValue(config["subscription_tier"])
             ?? loadCredential()?.planHint {
             usage.planName = prettyPlanName(tier)
-        } else if let credential = loadCredential(), let email = credential.email, !email.isEmpty {
-            usage.planName = email
         }
 
         return usage

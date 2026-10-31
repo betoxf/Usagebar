@@ -21,7 +21,7 @@ nonisolated enum KimiAuthSource: String {
         case .apiKey:
             return "via API Key"
         case .cli:
-            return "via KimiCode CLI"
+            return "via Kimi Code CLI"
         case .webToken:
             return "via Web Token"
         }
@@ -78,19 +78,19 @@ nonisolated enum KimiServiceError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .noCredentials:
-            return "Run `kimi login` or add a KimiCode credential"
+            return "Run `kimi login` or add a Kimi Code credential"
         case .expiredCLICredential:
-            return "KimiCode CLI login expired — run `kimi login` again"
+            return "Kimi Code CLI login expired — run `kimi login` again"
         case .refreshInProgress:
-            return "KimiCode login is being refreshed — try again in a moment"
+            return "Kimi Code login is being refreshed — try again in a moment"
         case .unauthorized:
-            return "KimiCode credential expired — sign in again"
+            return "Kimi Code credential expired — sign in again"
         case .rateLimited:
-            return "KimiCode usage could not be verified right now"
+            return "Kimi Code usage could not be verified right now"
         case .invalidResponse:
-            return "KimiCode returned an unsupported usage response"
+            return "Kimi Code returned an unsupported usage response"
         case .httpStatus(let status):
-            return "KimiCode usage request failed (status: \(status))"
+            return "Kimi Code usage request failed (status: \(status))"
         }
     }
 }

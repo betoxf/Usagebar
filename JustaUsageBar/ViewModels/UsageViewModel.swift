@@ -112,6 +112,7 @@ final class UsageViewModel: ObservableObject {
     private var isMenuOpen = false
     private var isRotating = false
     private var lastCredentialCheck: Date?
+    private var isCheckingSignIns = false
 
     @AppStorage("hasLaunchedBefore") private var hasLaunchedBefore = false
 
@@ -160,6 +161,8 @@ final class UsageViewModel: ObservableObject {
 
     // UI availability checks are memory-only. Services own discovery and its caches.
     var hasCredentials: Bool { !availableProviders.isEmpty }
+    /// False until the first look for sign-ins finishes, so "none yet" means nothing.
+    var hasCheckedCredentials: Bool { lastCredentialCheck != nil }
     var hasClaudeCredentials: Bool { availableProviders.contains(.claude) }
     var hasCodexCredentials: Bool { availableProviders.contains(.codex) }
     var hasCursorCredentials: Bool { availableProviders.contains(.cursor) }
@@ -288,6 +291,32 @@ final class UsageViewModel: ObservableObject {
         kimiAuthSource = kimiSource
         knownTargets = refreshTargets
         lastCredentialCheck = Date()
+    }
+
+    /// Looks for new sign-ins while the setup window is open. Only providers being
+    /// connected right now skip the discovery caches, so one that stays signed
+    /// out isn't read every few seconds.
+    func checkForNewSignIns(connecting: Set<DisplayProvider>) async {
+        guard !isCheckingSignIns, !isBackgroundSuspended else { return }
+        isCheckingSignIns = true
+        defer { isCheckingSignIns = false }
+        if let credentialChangeTask { await credentialChangeTask.value }
+
+        let known = availableProviders
+        for provider in connecting.subtracting(known) {
+            switch provider {
+            case .claude: await ClaudeOAuthService.shared.clearCache()
+            case .codex: await CodexAPIService.shared.clearCache()
+            case .cursor: await CursorAPIService.shared.clearCache()
+            case .kimi: await KimiAPIService.shared.clearCache()
+            case .zai: await ZaiAPIService.shared.clearCache()
+            case .xai: await XaiAPIService.shared.clearCache()
+            }
+        }
+        await detectCredentials(forceReload: false)
+        if availableProviders != known {
+            await requestRefresh()
+        }
     }
 
     private func performRefresh(manual: Bool, rediscover: Bool) async {
@@ -499,10 +528,6 @@ final class UsageViewModel: ObservableObject {
     }
 
     func saveCredentials(sessionKey: String, organizationId: String) {
-        if sessionKey == "__oauth__" || sessionKey.hasPrefix("__detected__") {
-            Task { await rediscoverCredentialsAndRefresh() }
-            return
-        }
         changeCredentials {
             CredentialStorage.shared.setWebSession(
                 sessionKey: sessionKey.trimmingCharacters(in: .whitespacesAndNewlines),

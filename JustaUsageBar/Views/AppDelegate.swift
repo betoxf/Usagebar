@@ -721,7 +721,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 provider: .cursor,
                 detail: cursor.planName != "unknown" ? displayPlanName(cursor.planName) : "",
                 rows: [UsagePanelRow(label: cursor.windowLabel, percent: cursor.usedPercent, resetText: cursor.timeUntilReset)],
-                message: viewModel.cursorError
+                message: viewModel.cursorError ?? (cursor.weeklyIsStale ? "Couldn't refresh weekly usage" : nil)
             ))
         }
 

@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.12.2](https://github.com/betoxf/Usagebar/releases/tag/v1.12.2) — 2026-10-31
+
+- Keep Cursor's last weekly reading when its weekly usage can't be read, instead of falling back to the monthly figure, which could show a spent allowance as 0%. The card notes that the reading couldn't be refreshed, and the reading is dropped at its reset time.
+
 ## [1.12.1](https://github.com/betoxf/Usagebar/releases/tag/v1.12.1) — 2026-10-31
 
 - Remove XAI as a separate provider. Its card could appear with an error when xAI's billing service was down, even when Grok runs on the Cursor plan. Grok usage stays on the Cursor card, and Grok apps and the Grok CLI show Cursor in the menu bar. Usagebar no longer contacts xAI or reads Grok's sign-in.

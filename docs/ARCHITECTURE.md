@@ -106,6 +106,7 @@ A configured Codex base URL changes the Codex usage destination. Provider-privat
 | --- | --- |
 | Display preferences | `UserDefaults` through `@AppStorage` |
 | Launch at login | `SMAppService.mainApp` |
+| Last Cursor weekly reading | `UserDefaults`: the percentage and reset time only, so a failed weekly request keeps showing it until it resets. |
 | Terminal sign-in | A `.command` file in the temporary directory that holds only the provider's login command and deletes itself when it finishes. |
 | Claude browser-session data, OAuth mirror, and optional Kimi credential | `~/Library/Application Support/JustaUsageBar/credentials.enc` |
 | Provider CLI credentials | Provider-owned files or Keychain items; Kimi OAuth tokens may be refreshed in place, while other provider credentials are read only |

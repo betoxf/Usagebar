@@ -35,16 +35,31 @@ extension AppDelegate {
             viewModel.useRenderingFixtures(providers)
             menuWillOpen(menu)
             if providers.isEmpty {
-                precondition(menu.items.contains { $0.title == "Setup Usage Tracking" })
+                precondition(menu.items.contains { $0.title == "Set Up Usagebar…" })
             } else {
                 precondition(menu.items.contains { $0.title == "Refresh" })
                 let updates = menu.items.first { $0.title == "Last Updates" }?.submenu
                 precondition(updates?.numberOfItems == providers.count)
+                precondition(menu.items.contains { $0.title == "Connect More Tools…" })
             }
             menuDidClose(menu)
             let firstItem = menu.items.first
             rebuildMenu()
             precondition(menu.items.first === firstItem, "Closed menu rebuilt")
+        }
+
+        viewModel.useRenderingFixtures([])
+        showSetupStatus()
+        precondition(statusItem.button?.image?.isTemplate == true, "Setup status ignored the menu bar's appearance")
+        precondition(ProviderSignIn.terminal(executable: "/a b/it's", arguments: ["login"]).command == "'/a b/it'\\''s' 'login'",
+                     "Login command was not quoted for the shell")
+        verifySetupModel()
+        statusBarButtonClicked()
+        precondition(setupWindow?.isVisible == true, "A click with nothing connected did not open setup")
+        setupWindow?.close()
+        precondition(setupWindow == nil, "Closing setup left it watching for sign-ins")
+        if let output {
+            try renderSetup(to: output)
         }
 
         viewModel.useRenderingFixtures([.claude, .codex])
@@ -153,6 +168,48 @@ extension AppDelegate {
             try png.write(to: output)
         }
     }
+
+    private func verifySetupModel() {
+        let model = SetupModel()
+        let start = Date()
+        _ = model.update(available: [], now: start)
+        precondition(model.signIns.count == SetupModel.providers.count, "A provider had no way to connect")
+        precondition(!SetupModel.providers.contains(.xai), "Grok got a second row beside Cursor")
+        model.startConnecting(.claude)
+        model.startConnecting(.codex)
+        precondition(model.update(available: [.claude], now: start) == [.claude], "A finished sign-in was missed")
+        precondition(model.connecting.keys.contains(.codex) && model.signIns[.claude] == nil, "Row states drifted")
+        precondition(model.update(available: [.claude], now: start.addingTimeInterval(601)).isEmpty, "A timeout counted as a sign-in")
+        precondition(model.connecting.isEmpty, "An abandoned sign-in was watched forever")
+    }
+
+    /// Saves the setup window beside the status preview, signed out and connected.
+    private func renderSetup(to output: URL) throws {
+        if let tiff = statusItem.button?.image?.tiffRepresentation {
+            try NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:])?
+                .write(to: output.deletingPathExtension().appendingPathExtension("setup-status.png"))
+        }
+        loadProviderMarks()
+        setupModel.cursorMarks = panelModel.cursorMarks
+        setupModel.zcodeMark = panelModel.zcodeMark
+        _ = setupModel.update(available: [])
+        for (name, providers, appearance) in [
+            ("setup-light", Set<DisplayProvider>(), NSAppearance.Name.aqua),
+            ("setup-dark", [.claude], .darkAqua)
+        ] {
+            viewModel.useRenderingFixtures(providers)
+            let view = NSHostingView(rootView: SetupView(viewModel: viewModel, model: setupModel)
+                .background(Color(nsColor: .windowBackgroundColor)))
+            view.appearance = NSAppearance(named: appearance)
+            view.frame = NSRect(origin: .zero, size: view.fittingSize)
+            view.layoutSubtreeIfNeeded()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+            guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
+            view.cacheDisplay(in: view.bounds, to: bitmap)
+            let url = output.deletingPathExtension().appendingPathExtension("\(name).png")
+            try bitmap.representation(using: .png, properties: [:])?.write(to: url)
+        }
+    }
 }
 
 @main
@@ -170,6 +227,6 @@ struct StatusRenderingTests {
         let model = UsageViewModel(startAutomatically: false)
         let output = ProcessInfo.processInfo.environment["USAGEBAR_RENDER_OUTPUT"].map { URL(fileURLWithPath: $0) }
         try AppDelegate(viewModel: model).verifyRendering(output: output)
-        print("PASS: setup/Claude/Codex menus, closed-menu reuse, status image caching, light/dark rendering, Claude without a 5-hour window, focus following, shared Cursor plan")
+        print("PASS: setup status and model, setup/Claude/Codex menus, closed-menu reuse, status image caching, light/dark rendering, Claude without a 5-hour window, focus following, shared Cursor plan")
     }
 }

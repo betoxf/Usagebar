@@ -24,10 +24,8 @@ else
     echo "  Option 1: Install Homebrew first, then re-run this script:"
     echo '    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
     echo ""
-    echo "  Option 2: Build from source:"
-    echo "    git clone https://github.com/betoxf/Usagebar.git"
-    echo "    cd Usagebar && make release"
-    echo "    cp -R build/Release/Usagebar.app /Applications/"
+    echo "  Option 2: Download Usagebar.zip and move Usagebar.app to /Applications:"
+    echo "    https://github.com/betoxf/Usagebar/releases/latest"
     echo ""
     exit 1
 fi

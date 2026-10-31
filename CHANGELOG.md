@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.11.3](https://github.com/betoxf/Usagebar/releases/tag/v1.11.3) — 2026-10-31
+
+- Hide Claude's five-hour limit on plans that no longer have one. The menu bar and panel show the weekly limit alone instead of a 5h reading of 0%, and plans that still have the five-hour limit look the same as before.
+
 ## [1.11.2](https://github.com/betoxf/Usagebar/releases/tag/v1.11.2) — 2026-10-29
 
 - Find Cursor again after Cursor 3.28 started encrypting its sign-in on disk. Usagebar now falls back to the Cursor Agent CLI's sign-in, so the Cursor card and its xAI, Grok, Cursor and Grok Bot marks are back, and Grok Bot in front selects them again.

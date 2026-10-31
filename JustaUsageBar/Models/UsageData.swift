@@ -42,8 +42,8 @@ nonisolated struct MessageLimit: Codable {
 // MARK: - App Models
 
 nonisolated struct UsageData {
-    // 5-hour window
-    var fiveHourUsed: Int = 0
+    // 5-hour window (only present on plans that have one)
+    var fiveHourUsed: Int?
     var fiveHourLimit: Int = 100
     var fiveHourResetAt: Date?
 
@@ -57,7 +57,7 @@ nonisolated struct UsageData {
     var fableResetAt: Date?
 
     var fiveHourPercentage: Double {
-        guard fiveHourLimit > 0 else { return 0 }
+        guard let fiveHourUsed, fiveHourLimit > 0 else { return 0 }
         return min(Double(fiveHourUsed) / Double(fiveHourLimit) * 100, 100)
     }
 

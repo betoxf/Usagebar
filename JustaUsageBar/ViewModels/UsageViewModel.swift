@@ -33,11 +33,6 @@ final class UsageViewModel: ObservableObject {
     @Published var zaiUsageData: ZaiUsageData = .placeholder
     @Published var zaiError: String?
 
-    // MARK: - XAI / Grok Build Published Properties
-
-    @Published var xaiUsageData: XaiUsageData = .placeholder
-    @Published var xaiError: String?
-
     // MARK: - Kimi Published Properties
 
     @Published var kimiUsageData: KimiUsageData = .placeholder
@@ -60,7 +55,6 @@ final class UsageViewModel: ObservableObject {
     @AppStorage("showCodex") var showCodex: Bool = true
     @AppStorage("showCursor") var showCursor: Bool = true
     @AppStorage("showZai") var showZai: Bool = true
-    @AppStorage("showXai") var showXai: Bool = true
     @AppStorage("showKimi") var showKimi: Bool = true
     @AppStorage("animationInterval") var animationInterval: Double = 8.0
     @AppStorage("followActiveApp") var followActiveApp: Bool = true
@@ -150,7 +144,6 @@ final class UsageViewModel: ObservableObject {
             case .cursor: return showCursor
             case .kimi: return showKimi
             case .zai: return showZai
-            case .xai: return showXai
             }
         })
     }
@@ -167,11 +160,7 @@ final class UsageViewModel: ObservableObject {
     var hasCodexCredentials: Bool { availableProviders.contains(.codex) }
     var hasCursorCredentials: Bool { availableProviders.contains(.cursor) }
     var hasZaiCredentials: Bool { availableProviders.contains(.zai) }
-    var hasXaiCredentials: Bool { availableProviders.contains(.xai) }
     var hasKimiCredentials: Bool { availableProviders.contains(.kimi) }
-    /// Grok on unified billing draws on the Cursor plan, so with Cursor signed in
-    /// the Cursor entry, whose marks include xAI and Grok, stands for both.
-    var xaiSharesCursorPlan: Bool { hasCursorCredentials && xaiUsageData.isUnifiedBilling }
 
     var shouldAnimateProviders: Bool {
         !isBackgroundSuspended && !lowPowerMode &&
@@ -264,7 +253,6 @@ final class UsageViewModel: ObservableObject {
             await CodexAPIService.shared.clearCache()
             await CursorAPIService.shared.clearCache()
             await ZaiAPIService.shared.clearCache()
-            await XaiAPIService.shared.clearCache()
             await KimiAPIService.shared.clearCache()
         }
         async let claude = ClaudeOAuthService.shared.hasCredentials
@@ -272,18 +260,16 @@ final class UsageViewModel: ObservableObject {
         async let codex = CodexAPIService.shared.hasCredentials
         async let cursor = CursorAPIService.shared.hasCredentials
         async let zai = ZaiAPIService.shared.hasCredentials
-        async let xai = XaiAPIService.shared.hasCredentials
         async let kimi = KimiAPIService.shared.detectedAuthSource
         async let savedKimi = KimiAPIService.shared.hasSavedCredential
-        let (hasClaude, hasWeb, hasCodex, hasCursor, hasZai, hasXai, kimiSource, saved) =
-            await (claude, web, codex, cursor, zai, xai, kimi, savedKimi)
+        let (hasClaude, hasWeb, hasCodex, hasCursor, hasZai, kimiSource, saved) =
+            await (claude, web, codex, cursor, zai, kimi, savedKimi)
         guard !Task.isCancelled else { return }
         var available: Set<DisplayProvider> = []
         if hasClaude || hasWeb { available.insert(.claude) }
         if hasCodex { available.insert(.codex) }
         if hasCursor { available.insert(.cursor) }
         if hasZai { available.insert(.zai) }
-        if hasXai { available.insert(.xai) }
         if kimiSource != .none { available.insert(.kimi) }
         if available != availableProviders { availableProviders = available }
         if saved != hasSavedKimiCredential { hasSavedKimiCredential = saved }
@@ -310,7 +296,6 @@ final class UsageViewModel: ObservableObject {
             case .cursor: await CursorAPIService.shared.clearCache()
             case .kimi: await KimiAPIService.shared.clearCache()
             case .zai: await ZaiAPIService.shared.clearCache()
-            case .xai: await XaiAPIService.shared.clearCache()
             }
         }
         await detectCredentials(forceReload: false)
@@ -366,10 +351,6 @@ final class UsageViewModel: ObservableObject {
                 let data = try await ZaiAPIService.shared.fetchUsage()
                 try Task.checkCancellation()
                 zaiUsageData = data
-            case .xai:
-                let data = try await XaiAPIService.shared.fetchUsage()
-                try Task.checkCancellation()
-                xaiUsageData = data
             case .kimi:
                 let data = try await KimiAPIService.shared.fetchUsage()
                 let source = await KimiAPIService.shared.lastAuthSource
@@ -404,7 +385,6 @@ final class UsageViewModel: ObservableObject {
         case .codex: codexError = message
         case .cursor: cursorError = message
         case .zai: zaiError = message
-        case .xai: xaiError = message
         case .kimi: kimiError = message
         }
     }

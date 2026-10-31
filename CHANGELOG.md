@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.12.1](https://github.com/betoxf/Usagebar/releases/tag/v1.12.1) — 2026-10-31
+
+- Remove XAI as a separate provider. Its card could appear with an error when xAI's billing service was down, even when Grok runs on the Cursor plan. Grok usage stays on the Cursor card, and Grok apps and the Grok CLI show Cursor in the menu bar. Usagebar no longer contacts xAI or reads Grok's sign-in.
+
 ## [1.12.0](https://github.com/betoxf/Usagebar/releases/tag/v1.12.0) — 2026-10-31
 
 - Set up in one window. If Usagebar finds no sign-in on first launch, the window opens by itself. Click **Sign In** next to each tool you use, and it shows **Connected** on its own, with no Refresh. The old window that asked for a session cookie from DevTools is gone.

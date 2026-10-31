@@ -116,18 +116,6 @@ nonisolated struct ZaiUsageData { var testValue = 0; static let placeholder = Za
     }
 }
 
-nonisolated struct XaiUsageData { var testValue = 0; var isUnifiedBilling = false; static let placeholder = XaiUsageData() }
-
-@ProviderActor final class XaiAPIService {
-    static let shared = XaiAPIService()
-    var hasCredentials: Bool { FakeProviders.probe(.xai) }
-    func clearCache() {}
-    func fetchUsage() async throws -> XaiUsageData {
-        let value = try await FakeProviders.fetch(.xai)
-        return XaiUsageData(testValue: value)
-    }
-}
-
 nonisolated struct KimiUsageData { var testValue = 0; static let placeholder = KimiUsageData() }
 
 @ProviderActor final class KimiAPIService {

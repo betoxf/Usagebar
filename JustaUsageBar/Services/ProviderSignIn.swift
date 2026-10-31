@@ -21,7 +21,7 @@ nonisolated enum ProviderSignIn: Equatable {
     /// There is nothing to sign in with yet, so the download page comes first.
     case download(title: String, url: URL)
 
-    static func available(for provider: DisplayProvider) -> ProviderSignIn? {
+    static func available(for provider: DisplayProvider) -> ProviderSignIn {
         switch provider {
         case .claude:
             return login("claude", arguments: ["auth", "login"], alsoIn: [".claude/local"])
@@ -36,8 +36,6 @@ nonisolated enum ProviderSignIn: Equatable {
             return login("kimi", alsoIn: [".kimi-code/bin"]) ?? .kimiKey
         case .zai:
             return .zaiKey
-        case .xai:
-            return nil
         }
     }
 

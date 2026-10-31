@@ -11,6 +11,15 @@ import Foundation
 
 nonisolated struct CodexUsageData {
     var planType: String = "unknown"
+    /// The plan as people read it, empty until the API reports one.
+    var planName: String {
+        switch planType {
+        case "unknown": ""
+        case "prolite": "Pro Lite"
+        case "promax": "Pro Max"
+        default: displayPlanName(planType)
+        }
+    }
     var primaryUsedPercent: Int = 0
     var primaryResetAt: Date?
     var primaryWindowSeconds: Int = 18000

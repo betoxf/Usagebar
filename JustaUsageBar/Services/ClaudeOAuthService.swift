@@ -22,6 +22,7 @@ final class ClaudeOAuthService {
 
     private var cachedCredentials: OAuthCredentials?
     private var lastCredentialCheck: Date?
+    private var hasLookedForPlan = false
     private let cacheTTL: TimeInterval = 300 // 5 minutes
 
     nonisolated struct OAuthCredentials {
@@ -29,6 +30,17 @@ final class ClaudeOAuthService {
         var refreshToken: String?
         var expiresAt: Date?
         var scopes: [String]
+        var subscriptionType: String?
+        var rateLimitTier: String?
+
+        /// "Max 20x" from `max` and `default_claude_max_20x`.
+        var planName: String? {
+            guard let subscriptionType, !subscriptionType.isEmpty else { return nil }
+            let name = displayPlanName(subscriptionType)
+            guard let multiplier = rateLimitTier?.split(separator: "_").last,
+                  multiplier.hasSuffix("x"), Int(multiplier.dropLast()) != nil else { return name }
+            return "\(name) \(multiplier)"
+        }
     }
 
     private init() {}
@@ -56,19 +68,26 @@ final class ClaudeOAuthService {
         if let c = readPersistedCredentials() { candidates.append(c) }
         if let c = readCredentialsFile() { candidates.append(c) }
 
-        if let best = freshest(of: candidates), !isExpired(best) {
+        if let best = freshest(of: candidates), !isExpired(best),
+           best.subscriptionType != nil || hasLookedForPlan {
             cache(credentials: best, persist: true)
             return best
         }
 
         // Only now consult the keychain, and read exactly ONE item's secret
         // (the newest) so the user sees at most a single permission prompt.
+        // A mirror from before plans were kept has none, so that asks once a launch.
+        hasLookedForPlan = true
         if let c = readFreshestFromKeychain() { candidates.append(c) }
 
-        guard let best = freshest(of: candidates) else {
+        guard var best = freshest(of: candidates) else {
             cachedCredentials = nil
             lastCredentialCheck = Date()
             return nil
+        }
+        if best.subscriptionType == nil, let plan = candidates.first(where: { $0.subscriptionType != nil }) {
+            best.subscriptionType = plan.subscriptionType
+            best.rateLimitTier = plan.rateLimitTier
         }
 
         // Mirror the freshest so later loads stay cheap and prompt-free.
@@ -106,7 +125,9 @@ final class ClaudeOAuthService {
             accessToken: accessToken,
             refreshToken: refreshToken,
             expiresAt: expiresAt,
-            scopes: scopes
+            scopes: scopes,
+            subscriptionType: oauth["subscriptionType"] as? String,
+            rateLimitTier: oauth["rateLimitTier"] as? String
         )
     }
 
@@ -304,7 +325,7 @@ final class ClaudeOAuthService {
 
         switch httpResponse.statusCode {
         case 200:
-            return try parseOAuthUsageResponse(data)
+            return try parseOAuthUsageResponse(data, planName: creds.planName)
         case 429:
             throw APIError.rateLimited(retryAfter: HTTPRetryAfter.date(from: httpResponse))
         case 400, 401, 403:
@@ -324,7 +345,7 @@ final class ClaudeOAuthService {
                         clearPersistedCredentials()
                         throw APIError.unauthorized
                     }
-                    return try parseOAuthUsageResponse(retryData)
+                    return try parseOAuthUsageResponse(retryData, planName: newCreds.planName)
                 } catch let rateLimitError as APIError where rateLimitError.isRateLimited {
                     // Temporary throttle: keep credentials, try again next tick.
                     throw rateLimitError
@@ -392,7 +413,9 @@ final class ClaudeOAuthService {
             accessToken: accessToken,
             refreshToken: newRefreshToken,
             expiresAt: expiresAt,
-            scopes: cachedCredentials?.scopes ?? []
+            scopes: cachedCredentials?.scopes ?? [],
+            subscriptionType: cachedCredentials?.subscriptionType,
+            rateLimitTier: cachedCredentials?.rateLimitTier
         )
     }
 
@@ -408,7 +431,9 @@ final class ClaudeOAuthService {
             accessToken: credentials.accessToken,
             refreshToken: credentials.refreshToken,
             expiresAt: credentials.expiresAt,
-            scopes: credentials.scopes
+            scopes: credentials.scopes,
+            subscriptionType: credentials.subscriptionType,
+            rateLimitTier: credentials.rateLimitTier
         )
     }
 
@@ -421,7 +446,9 @@ final class ClaudeOAuthService {
             accessToken: stored.accessToken,
             refreshToken: stored.refreshToken,
             expiresAt: stored.expiresAt,
-            scopes: stored.scopes
+            scopes: stored.scopes,
+            subscriptionType: stored.subscriptionType,
+            rateLimitTier: stored.rateLimitTier
         )
     }
 
@@ -437,12 +464,13 @@ final class ClaudeOAuthService {
 
     // MARK: - Parse Response
 
-    private func parseOAuthUsageResponse(_ data: Data) throws -> UsageData {
+    private func parseOAuthUsageResponse(_ data: Data, planName: String?) throws -> UsageData {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw APIError.decodingError(NSError(domain: "JSON", code: 0, userInfo: [NSLocalizedDescriptionKey: "Invalid JSON"]))
         }
 
         var usageData = UsageData()
+        usageData.planName = planName
 
         if let fiveHour = json["five_hour"] as? [String: Any] {
             if let utilization = fiveHour["utilization"] as? Double {

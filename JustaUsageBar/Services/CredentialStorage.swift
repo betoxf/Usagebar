@@ -27,6 +27,8 @@ final class CredentialStorage {
         var refreshToken: String?
         var expiresAt: Date?
         var scopes: [String]
+        var subscriptionType: String?
+        var rateLimitTier: String?
     }
 
     private init() {

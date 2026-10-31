@@ -670,11 +670,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         var cards: [UsagePanelCard] = []
 
         if viewModel.showClaude {
-            let detail: String = switch viewModel.claudeAuthSource {
+            let source: String = switch viewModel.claudeAuthSource {
             case .oauth: "via OAuth"
             case .webSession: "via Browser"
             case .none: ""
             }
+            let detail = viewModel.usageData.planName ?? source
             if viewModel.hasClaudeCredentials {
                 let usage = viewModel.usageData
                 var rows: [UsagePanelRow] = []
@@ -700,7 +701,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
         if viewModel.showCodex {
             let codex = viewModel.codexUsageData
-            let detail = codex.planType != "unknown" ? codex.planType.capitalized : ""
+            let detail = codex.planName
             if viewModel.hasCodexCredentials {
                 var rows = [UsagePanelRow(
                     label: codex.primaryIsWeekly ? "7d" : codex.primaryWindowLabel,
@@ -727,7 +728,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             let cursor = viewModel.cursorUsageData
             cards.append(UsagePanelCard(
                 provider: .cursor,
-                detail: cursor.planName != "unknown" ? cursor.planName.capitalized : "",
+                detail: cursor.planName != "unknown" ? displayPlanName(cursor.planName) : "",
                 rows: [UsagePanelRow(label: cursor.windowLabel, percent: cursor.usedPercent, resetText: cursor.timeUntilReset)],
                 message: viewModel.cursorError
             ))
@@ -751,7 +752,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             let zai = viewModel.zaiUsageData
             cards.append(UsagePanelCard(
                 provider: .zai,
-                detail: zai.planName != "unknown" ? zai.planName.capitalized : "",
+                detail: zai.planName != "unknown" ? displayPlanName(zai.planName) : "",
                 rows: [UsagePanelRow(label: zai.windowLabel, percent: zai.usedPercent, resetText: zai.timeUntilReset)],
                 message: viewModel.zaiError
             ))

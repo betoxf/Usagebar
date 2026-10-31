@@ -73,7 +73,7 @@ The check runs when an application comes to the front and repeats off the main t
 
 ## Credential discovery
 
-Claude priority is: Usagebar's encrypted OAuth mirror, `~/.claude/.credentials.json`, the `Claude Code-credentials` Keychain item through `/usr/bin/security`, direct Keychain lookup, then the Usagebar-managed browser session fallback.
+Claude priority is: Usagebar's encrypted OAuth mirror, `~/.claude/.credentials.json`, the `Claude Code-credentials` Keychain item through `/usr/bin/security`, direct Keychain lookup, then the Usagebar-managed browser session fallback. The plan on Claude's card comes from `subscriptionType` and `rateLimitTier` in those credentials. A mirror saved before Usagebar kept them has no plan, so the Keychain is read once per launch to fill it in.
 
 Codex reads `${CODEX_HOME}/auth.json` or `~/.codex/auth.json`. It reads `chatgpt_base_url` from `${CODEX_HOME}/config.toml` when present and otherwise uses `https://chatgpt.com`.
 

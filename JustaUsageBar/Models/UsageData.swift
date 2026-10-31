@@ -56,6 +56,9 @@ nonisolated struct UsageData {
     var fableUsed: Int?
     var fableResetAt: Date?
 
+    // Plan, such as "Max 20x" (unknown for a browser session)
+    var planName: String?
+
     var fiveHourPercentage: Double {
         guard let fiveHourUsed, fiveHourLimit > 0 else { return 0 }
         return min(Double(fiveHourUsed) / Double(fiveHourLimit) * 100, 100)
@@ -129,4 +132,14 @@ extension UsageData {
             return .red
         }
     }
+}
+
+/// A provider's plan id as people read it: "pro_plus" becomes "Pro Plus". Names
+/// with capitals or spaces, such as "GLM Coding Pro", are already readable.
+nonisolated func displayPlanName(_ raw: String) -> String {
+    guard raw == raw.lowercased(), !raw.contains(" ") else { return raw }
+    return raw
+        .replacingOccurrences(of: "_", with: " ")
+        .replacingOccurrences(of: "-", with: " ")
+        .capitalized
 }

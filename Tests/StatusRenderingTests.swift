@@ -62,6 +62,8 @@ extension AppDelegate {
             try renderSetup(to: output)
         }
 
+        verifyPlanNames()
+
         viewModel.useRenderingFixtures([.claude, .codex])
         let sheet = NSImage(size: NSSize(width: 560, height: 240))
         for (row, appearance) in [NSAppearance.Name.aqua, .darkAqua].enumerated() {
@@ -169,6 +171,28 @@ extension AppDelegate {
         }
     }
 
+    private func verifyPlanNames() {
+        func plan(_ type: String?, _ tier: String?) -> String? {
+            ClaudeOAuthService.OAuthCredentials(accessToken: "", scopes: [], subscriptionType: type, rateLimitTier: tier).planName
+        }
+        precondition(plan("max", "default_claude_max_20x") == "Max 20x", "Claude's plan multiplier was lost")
+        precondition(plan("pro", nil) == "Pro" && plan("team", "default_claude_team") == "Team", "Claude's plan was misread")
+        precondition(plan(nil, "default_claude_max_5x") == nil, "A tier without a plan was shown")
+
+        precondition(displayPlanName("pro_plus") == "Pro Plus", "A plan id was left unreadable")
+        precondition(displayPlanName("GLM Coding Pro") == "GLM Coding Pro", "A readable plan name was changed")
+        var codex = CodexUsageData()
+        precondition(codex.planName.isEmpty, "An unknown Codex plan was shown")
+        codex.planType = "prolite"
+        precondition(codex.planName == "Pro Lite", "Codex's plan read as one word")
+
+        viewModel.useRenderingFixtures([.claude])
+        viewModel.usageData.planName = "Max 20x"
+        precondition(panelCards().first { $0.provider == .claude }?.detail == "Max 20x", "Claude's card hid its plan")
+        viewModel.usageData.planName = nil
+        precondition(panelCards().first { $0.provider == .claude }?.detail == "via OAuth", "Claude's card lost its fallback")
+    }
+
     private func verifySetupModel() {
         let model = SetupModel()
         let start = Date()
@@ -227,6 +251,6 @@ struct StatusRenderingTests {
         let model = UsageViewModel(startAutomatically: false)
         let output = ProcessInfo.processInfo.environment["USAGEBAR_RENDER_OUTPUT"].map { URL(fileURLWithPath: $0) }
         try AppDelegate(viewModel: model).verifyRendering(output: output)
-        print("PASS: setup status and model, setup/Claude/Codex menus, closed-menu reuse, status image caching, light/dark rendering, Claude without a 5-hour window, focus following, shared Cursor plan")
+        print("PASS: plan names, setup status and model, setup/Claude/Codex menus, closed-menu reuse, status image caching, light/dark rendering, Claude without a 5-hour window, focus following, shared Cursor plan")
     }
 }

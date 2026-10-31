@@ -237,9 +237,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         if bundleId == "dev.zcode.app" || name == "zcode" {
             return .zai
         }
-        // Grok / xAI apps and Terminal sessions named around Grok Build.
+        // Grok runs on the Cursor plan, whose marks include it.
         if bundleId.contains("xai") || bundleId.contains("x.ai") || name == "grok" || name.contains("grok") {
-            return .xai
+            return .cursor
         }
         return nil
     }
@@ -406,10 +406,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         let hasCodex = viewModel.hasCodexCredentials
         let hasCursor = viewModel.hasCursorCredentials
         let hasZai = viewModel.hasZaiCredentials
-        let hasXai = hasCredentials(for: .xai)
         let hasKimi = viewModel.hasKimiCredentials
 
-        if !hasClaude && !hasCodex && !hasCursor && !hasZai && !hasXai && !hasKimi {
+        if !hasClaude && !hasCodex && !hasCursor && !hasZai && !hasKimi {
             let setupItem = NSMenuItem(title: "Set Up Usagebar…", action: #selector(showSetupWindow), keyEquivalent: "")
             setupItem.target = self
             menu.addItem(setupItem)
@@ -427,7 +426,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 case .cursor: "Cursor"
                 case .kimi: "Kimi Code"
                 case .zai: "z.ai"
-                case .xai: "XAI"
                 }
                 let item = NSMenuItem(title: "\(title): \(viewModel.freshnessText(for: provider))", action: nil, keyEquivalent: "")
                 item.isEnabled = false
@@ -456,7 +454,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             displayMenu.addItem(onlyWeeklyItem)
 
             // Provider toggles
-            let authedProviderCount = [hasClaude, hasCodex, hasCursor, hasKimi, hasZai, hasXai].filter { $0 }.count
+            let authedProviderCount = [hasClaude, hasCodex, hasCursor, hasKimi, hasZai].filter { $0 }.count
             if authedProviderCount > 0 {
                 displayMenu.addItem(NSMenuItem.separator())
 
@@ -495,13 +493,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                     displayMenu.addItem(zaiToggle)
                 }
 
-                if hasXai {
-                    let xaiToggle = NSMenuItem(title: "Show XAI", action: #selector(toggleShowXai), keyEquivalent: "")
-                    xaiToggle.target = self
-                    xaiToggle.state = viewModel.showXai ? .on : .off
-                    displayMenu.addItem(xaiToggle)
-                }
-
                 // Follow-active-app + switch-interval apply once 2+ providers show.
                 if authedProviderCount >= 2 {
                     displayMenu.addItem(NSMenuItem.separator())
@@ -509,7 +500,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                     let followItem = NSMenuItem(title: "Follow Active App", action: #selector(toggleFollowActiveApp), keyEquivalent: "")
                     followItem.target = self
                     followItem.state = viewModel.followActiveApp ? .on : .off
-                    followItem.toolTip = "Show the provider of the AI app or terminal CLI you used last (Claude, ChatGPT/Codex, Cursor or Grok Bot, Kimi Code, ZCode, or Grok)"
+                    followItem.toolTip = "Show the provider of the AI app or terminal CLI you used last (Claude, ChatGPT/Codex, Cursor or Grok Bot, Kimi Code, or ZCode)"
                     displayMenu.addItem(followItem)
 
                     let intervalMenu = NSMenu()
@@ -575,7 +566,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 menu.addItem(forgetKimi)
             }
 
-            if !viewModel.availableProviders.isSuperset(of: SetupModel.providers) {
+            if viewModel.availableProviders.count < DisplayProvider.allCases.count {
                 let connectItem = NSMenuItem(title: "Connect More Tools…", action: #selector(showSetupWindow), keyEquivalent: "")
                 connectItem.target = self
                 menu.addItem(connectItem)
@@ -758,15 +749,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             ))
         }
 
-        if hasCredentials(for: .xai) && viewModel.showXai {
-            let xai = viewModel.xaiUsageData
-            cards.append(UsagePanelCard(
-                provider: .xai,
-                detail: xai.planName != "unknown" ? xai.planName : "",
-                rows: [UsagePanelRow(label: "7d", percent: xai.primaryUsedPercent, resetText: xai.timeUntilWeeklyReset)],
-                message: viewModel.xaiError
-            ))
-        }
         return cards
     }
 
@@ -791,7 +773,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             case .claude: self.authenticateClaude()
             case .codex: self.authenticateCodex()
             case .kimi: self.authenticateKimi()
-            case .cursor, .zai, .xai: break
+            case .cursor, .zai: break
             }
         }
         panelModel.onRefresh = { [weak self] in
@@ -1076,8 +1058,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             (viewModel.showCodex && viewModel.hasCodexCredentials) ||
             (viewModel.showCursor && viewModel.hasCursorCredentials) ||
             (viewModel.showKimi && viewModel.hasKimiCredentials) ||
-            (viewModel.showZai && viewModel.hasZaiCredentials) ||
-            (viewModel.showXai && viewModel.hasXaiCredentials)
+            (viewModel.showZai && viewModel.hasZaiCredentials)
         if !anyShown {
             viewModel[keyPath: keyPath] = true
         }
@@ -1110,12 +1091,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     @objc private func toggleShowZai() {
         viewModel.showZai.toggle()
         ensureAProviderRemainsShown(fallback: \.showZai)
-        NotificationCenter.default.post(name: NSNotification.Name("SettingsChanged"), object: nil)
-    }
-
-    @objc private func toggleShowXai() {
-        viewModel.showXai.toggle()
-        ensureAProviderRemainsShown(fallback: \.showXai)
         NotificationCenter.default.post(name: NSNotification.Name("SettingsChanged"), object: nil)
     }
 
@@ -1687,18 +1662,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             return viewModel.hasKimiCredentials
         case .zai:
             return viewModel.hasZaiCredentials
-        case .xai:
-            return viewModel.hasXaiCredentials && !viewModel.xaiSharesCursorPlan
         }
-    }
-
-    /// Grok sharing the Cursor plan is shown as Cursor, whose marks include it.
-    private func shownProvider(for provider: DisplayProvider) -> DisplayProvider {
-        provider == .xai && viewModel.xaiSharesCursorPlan ? .cursor : provider
-    }
-
-    private var shownFocusProvider: DisplayProvider? {
-        focusProvider.map(shownProvider)
     }
 
     private func isProviderEnabled(_ provider: DisplayProvider) -> Bool {
@@ -1713,8 +1677,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             return viewModel.showKimi
         case .zai:
             return viewModel.showZai
-        case .xai:
-            return viewModel.showXai
         }
     }
 
@@ -1759,7 +1721,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 
     private func resolveProvider(preferred provider: DisplayProvider) -> DisplayProvider? {
-        let provider = shownProvider(for: provider)
         if canDisplay(provider) {
             return provider
         }
@@ -1777,7 +1738,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     private func syncCurrentProvider(preferSavedSelection: Bool = false, persistPreference: Bool = false) {
         // A Claude/ChatGPT/Codex app in front wins over saved selection and timer.
-        if viewModel.followActiveApp, let focusProvider = shownFocusProvider, canDisplay(focusProvider) {
+        if viewModel.followActiveApp, let focusProvider, canDisplay(focusProvider) {
             setCurrentProvider(focusProvider, persistPreference: false)
             return
         }
@@ -1793,7 +1754,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     private var currentRotationSignature: String {
         [String(viewModel.shouldAnimateProviders), String(viewModel.animationInterval),
-         viewModel.followActiveApp ? (shownFocusProvider?.rawValue ?? "none") : "manual",
+         viewModel.followActiveApp ? (focusProvider?.rawValue ?? "none") : "manual",
          displayableProviders().map(\.rawValue).joined(separator: ",")].joined(separator: "|")
     }
 
@@ -1803,7 +1764,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         rotationSignature = currentRotationSignature
 
         // Hold on the focused app's provider instead of flipping under it.
-        let holdsFocus = viewModel.followActiveApp && shownFocusProvider.map(canDisplay) == true
+        let holdsFocus = viewModel.followActiveApp && focusProvider.map(canDisplay) == true
         let rotates = viewModel.shouldAnimateProviders && !holdsFocus
         viewModel.rotationChanged(isRotating: rotates)
         guard rotates else { return }
@@ -1882,10 +1843,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             primary = viewModel.zaiUsageData.usedPercent
             secondary = nil
             label = viewModel.zaiUsageData.windowLabel
-        case .xai:
-            primary = viewModel.xaiUsageData.primaryUsedPercent
-            secondary = nil
-            label = viewModel.xaiUsageData.primaryWindowLabel
         }
         return StatusRenderKey(
             provider: currentProvider, primary: primary, secondary: secondary, windowLabel: label,
@@ -1919,14 +1876,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 glyph: .zai,
                 windowLabel: viewModel.zaiUsageData.windowLabel
             )
-        case .xai:
-            return createSimpleProviderImage(
-                label: "XAI",
-                brandColor: brandXaiColor,
-                usedPercent: viewModel.xaiUsageData.primaryUsedPercent,
-                glyph: .xai,
-                windowLabel: viewModel.xaiUsageData.primaryWindowLabel
-            )
         }
     }
 
@@ -1936,7 +1885,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         case cursor
         case kimi
         case zai
-        case xai
     }
 
     /// Compact status image for the single-percentage providers: brand glyph +
@@ -1966,7 +1914,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             let glyphColor: NSColor = switch glyph {
             case .cursor, .zai: isDarkMode ? NSColor.white : NSColor(white: 0.1, alpha: 1.0)
             case .kimi: brandColor
-            case .xai: brandColor
             }
             if glyph == .cursor {
                 drawCursorPlanMarks(centerX: width / 2, y: 12.5, height: 8, color: glyphColor)
@@ -2212,13 +2159,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             transform.scale(height)
             path.transform(using: transform)
             path.fill()
-        case .xai:
-            let xAttrs: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: 8, weight: .bold),
-                .foregroundColor: color
-            ]
-            let x = NSAttributedString(string: "X", attributes: xAttrs)
-            x.draw(at: NSPoint(x: rect.minX, y: rect.minY - 1))
         }
     }
 
@@ -2552,11 +2492,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     private var brandZaiColor: NSColor {
         NSColor(red: 0.91, green: 0.35, blue: 0.42, alpha: 1.0)
-    }
-
-    /// XAI brand mark is black; flip to white on dark menu bars so it stays readable.
-    private var brandXaiColor: NSColor {
-        getDarkMode() ? NSColor.white : NSColor.black
     }
 
     private func usageHighlightColor(

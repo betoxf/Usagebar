@@ -24,7 +24,6 @@ extension AppDelegate {
         viewModel.showCursor = false
         viewModel.showKimi = false
         viewModel.showZai = false
-        viewModel.showXai = false
         viewModel.showIcon = true
         viewModel.showOnly5hr = false
         viewModel.showOnlyWeekly = false
@@ -152,16 +151,6 @@ extension AppDelegate {
         terminalSessionChanged(to: nil)
         precondition(focusProvider == nil && currentProvider == .claude, "A CLI that ended moved the provider")
 
-        // Grok on the Cursor plan is shown as Cursor, not as a second entry.
-        viewModel.useRenderingFixtures([.claude, .cursor, .xai])
-        viewModel.showCursor = true
-        viewModel.showXai = true
-        precondition(panelCards().contains { $0.provider == .xai }, "Grok on its own plan was hidden")
-        viewModel.xaiUsageData.isUnifiedBilling = true
-        setFocus(.xai)
-        precondition(currentProvider == .cursor, "Grok in front did not show the Cursor plan")
-        precondition(!displayableProviders().contains(.xai) && !panelCards().contains { $0.provider == .xai },
-                     "Grok on the Cursor plan was shown twice")
         viewModel.followActiveApp = false
         follow(.current)
         precondition(terminalWatch == nil, "Watching continued with Follow Active App off")
@@ -199,8 +188,7 @@ extension AppDelegate {
         let model = SetupModel()
         let start = Date()
         _ = model.update(available: [], now: start)
-        precondition(model.signIns.count == SetupModel.providers.count, "A provider had no way to connect")
-        precondition(!SetupModel.providers.contains(.xai), "Grok got a second row beside Cursor")
+        precondition(model.signIns.count == DisplayProvider.allCases.count, "A provider had no way to connect")
         model.startConnecting(.claude)
         model.startConnecting(.codex)
         precondition(model.update(available: [.claude], now: start) == [.claude], "A finished sign-in was missed")
@@ -253,6 +241,6 @@ struct StatusRenderingTests {
         let model = UsageViewModel(startAutomatically: false)
         let output = ProcessInfo.processInfo.environment["USAGEBAR_RENDER_OUTPUT"].map { URL(fileURLWithPath: $0) }
         try AppDelegate(viewModel: model).verifyRendering(output: output)
-        print("PASS: plan names, setup status and model, setup/Claude/Codex menus, closed-menu reuse, status image caching, light/dark rendering, Claude without a 5-hour window, focus following, shared Cursor plan")
+        print("PASS: plan names, setup status and model, setup/Claude/Codex menus, closed-menu reuse, status image caching, light/dark rendering, Claude without a 5-hour window, focus following")
     }
 }

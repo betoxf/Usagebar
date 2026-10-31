@@ -13,9 +13,6 @@ import SwiftUI
 /// What the setup window shows beyond the view model's provider snapshot.
 /// `AppDelegate` keeps it current and handles the actions.
 final class SetupModel: ObservableObject {
-    /// The window lists one row per tool. Grok has none: the Cursor row stands for
-    /// it, and a Grok Build sign-in is still discovered like any other.
-    nonisolated static let providers = DisplayProvider.displayOrder.filter { $0 != .xai }
     /// How long a sign-in is watched closely after its button is clicked.
     nonisolated private static let connectingWindow: TimeInterval = 10 * 60
 
@@ -43,8 +40,8 @@ final class SetupModel: ObservableObject {
         if waiting != connecting { connecting = waiting }
 
         var current: [DisplayProvider: ProviderSignIn] = [:]
-        for provider in Self.providers where !available.contains(provider) {
-            current[provider] = ProviderSignIn.available(for: provider)
+        for provider in DisplayProvider.displayOrder where !available.contains(provider) {
+            current[provider] = .available(for: provider)
         }
         if current != signIns { signIns = current }
         return finished
@@ -64,7 +61,7 @@ struct SetupView: View {
         VStack(alignment: .leading, spacing: 16) {
             header
             VStack(spacing: 6) {
-                ForEach(SetupModel.providers, id: \.self) { provider in
+                ForEach(DisplayProvider.displayOrder, id: \.self) { provider in
                     SetupRow(
                         provider: provider,
                         isConnected: viewModel.availableProviders.contains(provider),
@@ -163,7 +160,6 @@ private struct SetupRow: View {
         case .cursor: "Cursor"
         case .kimi: "Kimi Code"
         case .zai: "z.ai"
-        case .xai: "XAI"
         }
     }
 
@@ -177,7 +173,6 @@ private struct SetupRow: View {
         case .cursor: "Cursor and Grok Bot"
         case .kimi: "Kimi Code CLI or API key"
         case .zai: "z.ai coding plan"
-        case .xai: "Grok Build"
         }
     }
 

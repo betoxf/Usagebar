@@ -41,7 +41,6 @@ flowchart LR
 | `KimiAPIService` | Discovers Kimi Code CLI credentials, selects API or web-token authentication, and normalizes weekly plus five-hour usage. |
 | `ZaiAPIService` | Discovers a z.ai API key from the environment, Keychain, or local config files and normalizes quota windows. |
 | `KeychainTool` | Reads a Keychain secret through `/usr/bin/security` without holding up other work when that tool has to ask. |
-| `XaiAPIService` | Discovers Grok Build credentials from `~/.grok/auth.json`, refreshes OIDC tokens, and normalizes weekly Grok Build credits. |
 | `CredentialStorage` | Encrypts Usagebar-managed Claude browser-session data and optional Kimi credentials locally. |
 
 ## Runtime data flow
@@ -65,9 +64,9 @@ The browser login view owns a cancellable repeating timer. Dismantling the view 
 
 ## Focus following
 
-With Follow Active App on, the frontmost application selects the provider: Claude, ChatGPT or Codex, Cursor and Grok Bot (Cursor's agent app, on the same subscription), Kimi Code, ZCode (z.ai), and Grok map by bundle identifier or name. When Grok Bot is signed in to the same Cursor account, the menu titles the Cursor section "Cursor & Grok Bot"; Usagebar compares only the hashed account keys in Grok Bot's `sand-secrets.json`, never its tokens. When Grok's billing reports unified billing and Cursor is signed in, Grok draws on the Cursor plan: the Cursor entry, whose marks include xAI and Grok, stands for both, and Grok in front selects it. Any other application, including a terminal whose CLI has ended, leaves the last provider on screen and lets rotation resume; a manual click overrides it until the next AI app or CLI comes to the front.
+With Follow Active App on, the frontmost application selects the provider: Claude, ChatGPT or Codex, Cursor and Grok Bot (Cursor's agent app, on the same subscription), Kimi Code, and ZCode (z.ai) map by bundle identifier or name. When Grok Bot is signed in to the same Cursor account, the menu titles the Cursor section "Cursor & Grok Bot"; Usagebar compares only the hashed account keys in Grok Bot's `sand-secrets.json`, never its tokens. Grok runs on the Cursor plan, so the Cursor entry, whose marks include xAI and Grok, stands for both, and Grok in front selects it. Any other application, including a terminal whose CLI has ended, leaves the last provider on screen and lets rotation resume; a manual click overrides it until the next AI app or CLI comes to the front.
 
-An application that is not mapped is checked for terminal sessions. `TerminalAgentDetector` lists pseudo-terminals by last input time, which is how `w` measures idle time, and reads the foreground processes of the most recently used session that the application hosts. A session with another application bundle among its ancestors belongs to that application; sessions under a detached server such as tmux or iTermServer count for any application that hosts a terminal. The launch path and arguments identify Claude Code, Codex, Cursor Agent, Kimi, and Grok. For Claude Code, `ANTHROPIC_BASE_URL` in the process environment selects z.ai or Kimi when it points at their gateway, and no provider when it points at another one.
+An application that is not mapped is checked for terminal sessions. `TerminalAgentDetector` lists pseudo-terminals by last input time, which is how `w` measures idle time, and reads the foreground processes of the most recently used session that the application hosts. A session with another application bundle among its ancestors belongs to that application; sessions under a detached server such as tmux or iTermServer count for any application that hosts a terminal. The launch path and arguments identify Claude Code, Codex, Cursor Agent, Kimi, and Grok, which selects Cursor. For Claude Code, `ANTHROPIC_BASE_URL` in the process environment selects z.ai or Kimi when it points at their gateway, and no provider when it points at another one.
 
 The check runs when an application comes to the front and repeats off the main thread while that application hosts terminals: every three seconds at first, every six once the application has been in front for about fifteen seconds, and every ten in Low Power Mode. It stops while the display sleeps and when fewer than two providers can be shown. It needs no Accessibility, Automation, or Screen Recording access, and nothing it reads is stored or sent.
 
@@ -98,8 +97,6 @@ z.ai reads `Z_AI_API_KEY`, `ZAI_API_KEY`, or `ZHIPU_API_KEY` from the environmen
 | Kimi web-token usage fallback | `https://www.kimi.com/apiv2/kimi.gateway.billing.v1.BillingService/GetUsages` |
 | Update discovery | `https://api.github.com/repos/betoxf/Usagebar/releases/latest` |
 | z.ai quota | `https://api.z.ai/api/monitor/usage/quota/limit` |
-| XAI / Grok Build billing | `https://cli-chat-proxy.grok.com/v1/billing?format=credits` |
-| XAI OIDC refresh | `https://auth.x.ai/oauth2/token` |
 
 A configured Codex base URL changes the Codex usage destination. Provider-private endpoints or payloads can change independently.
 

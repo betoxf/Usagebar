@@ -48,7 +48,7 @@ nonisolated enum TerminalAgentDetector {
             case "codex": return .codex
             case "cursor-agent": return .cursor
             case "kimi", "kimi-cli", "kimi-code": return .kimi
-            case "grok": return .xai
+            case "grok": return .cursor
             default: break
             }
             // Versioned installs and package entry points do not carry the tool's name.

@@ -111,7 +111,6 @@ struct PerformanceRegressionTests {
         model.showCursor = false
         model.showKimi = false
         model.showZai = false
-        model.showXai = false
         await model.refresh()
         var counts = await FakeProviders.counts
         check(counts[.claude] == 1 && counts[.codex] == 1 && counts[.kimi] == nil, "Hidden provider fetched")
@@ -204,7 +203,7 @@ struct PerformanceRegressionTests {
              nil, .cursor),
             ("/Users/a/.kimi-code/bin/kimi", ["kimi"], nil, .kimi),
             ("/usr/bin/python3", ["python3.13", "/Users/a/.local/bin/kimi-cli"], nil, .kimi),
-            ("/Users/a/.grok/bin/grok", ["grok"], nil, .xai),
+            ("/Users/a/.grok/bin/grok", ["grok"], nil, .cursor),
             ("/bin/zsh", ["-zsh"], zai, nil),
             ("/usr/bin/vim", ["vim", "codex"], nil, nil),
             ("/opt/homebrew/bin/node", ["node", "/Users/a/code/server.js"], nil, nil)

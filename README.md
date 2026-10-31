@@ -1,7 +1,7 @@
 <div align="center">
   <img src="assets/brand/usagebar-logo.png" alt="Usagebar" width="760">
 
-  <p><strong>Claude Code, Codex, Cursor, Kimi Code, z.ai, and Grok usage limits, directly in your macOS menu bar.</strong></p>
+  <p><strong>Claude Code, Codex, Cursor, Kimi Code, and z.ai usage limits, directly in your macOS menu bar.</strong></p>
   <p>A free, private, native Mac app that shows your 5-hour window, weekly cap, and when each one resets, without opening a browser.</p>
 
   <p>
@@ -37,11 +37,11 @@ Usage limits matter most while you are working. Usagebar keeps your Claude Code,
 
 | Capability | What it gives you |
 | --- | --- |
-| Multiple providers | Track Claude, Codex, Kimi Code, Cursor, z.ai, and XAI (Grok Build) from one status item. |
+| Multiple providers | Track Claude, Codex, Kimi Code, Cursor, and z.ai from one status item. |
 | At-a-glance limits | See rolling-window and weekly percentages without opening a browser. |
-| Focus-aware switching | Show the provider of the AI tool you used last: the Claude, ChatGPT/Codex, Cursor or Grok Bot, Kimi Code, ZCode, or Grok app, or the Claude Code, Codex, Cursor, Kimi, or Grok CLI running in your terminal. |
+| Focus-aware switching | Show the provider of the AI tool you used last: the Claude, ChatGPT/Codex, Cursor or Grok Bot, Kimi Code, or ZCode app, or the Claude Code, Codex, Cursor, or Kimi CLI running in your terminal. |
 | Usage panel | One card per provider with its plan, a meter per limit, and the time until it resets. Click a card to show that provider in the menu bar. |
-| Local credential discovery | Reuse the Claude Code, Codex, Cursor, Kimi Code, z.ai, and Grok sign-ins already on the Mac. No API keys to paste. |
+| Local credential discovery | Reuse the Claude Code, Codex, Cursor, Kimi Code, and z.ai sign-ins already on the Mac. No API keys to paste. |
 | Privacy-first operation | No Usagebar account, telemetry, analytics, or intermediary backend. |
 | Lightweight runtime | A native Swift menu-bar app with no web runtime or bundled service. |
 

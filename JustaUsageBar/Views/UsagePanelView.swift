@@ -263,8 +263,6 @@ struct ProviderMark: View {
                 templateImage(zcodeMark, height: 10.6)
                 Text("Code").fontWeight(.semibold)
             }
-        case .xai:
-            Text("XAI").fontWeight(.semibold)
         }
     }
 

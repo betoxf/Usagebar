@@ -33,13 +33,15 @@ final class ClaudeOAuthService {
         var subscriptionType: String?
         var rateLimitTier: String?
 
-        /// "Max 20x" from `max` and `default_claude_max_20x`.
+        /// Claude's plans are now Max and Ultra, but Claude Code still stores both
+        /// as `max`, with the old `default_claude_max_5x` or `_20x` tier. A Team
+        /// seat can have the 5x tier too, so only `max` is read this way.
         var planName: String? {
             guard let subscriptionType, !subscriptionType.isEmpty else { return nil }
-            let name = displayPlanName(subscriptionType)
-            guard let multiplier = rateLimitTier?.split(separator: "_").last,
-                  multiplier.hasSuffix("x"), Int(multiplier.dropLast()) != nil else { return name }
-            return "\(name) \(multiplier)"
+            if subscriptionType == "max", rateLimitTier?.hasSuffix("_20x") == true {
+                return "Ultra"
+            }
+            return displayPlanName(subscriptionType)
         }
     }
 

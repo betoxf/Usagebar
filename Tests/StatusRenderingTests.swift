@@ -175,8 +175,10 @@ extension AppDelegate {
         func plan(_ type: String?, _ tier: String?) -> String? {
             ClaudeOAuthService.OAuthCredentials(accessToken: "", scopes: [], subscriptionType: type, rateLimitTier: tier).planName
         }
-        precondition(plan("max", "default_claude_max_20x") == "Max 20x", "Claude's plan multiplier was lost")
-        precondition(plan("pro", nil) == "Pro" && plan("team", "default_claude_team") == "Team", "Claude's plan was misread")
+        precondition(plan("max", "default_claude_max_20x") == "Ultra", "Claude's 20x tier was not shown as Ultra")
+        precondition(plan("max", "default_claude_max_5x") == "Max" && plan("max", nil) == "Max", "Claude's Max plan was misread")
+        precondition(plan("ultra", nil) == "Ultra", "A stored Ultra plan was misread")
+        precondition(plan("pro", nil) == "Pro" && plan("team", "default_claude_max_5x") == "Team", "Claude's plan was misread")
         precondition(plan(nil, "default_claude_max_5x") == nil, "A tier without a plan was shown")
 
         precondition(displayPlanName("pro_plus") == "Pro Plus", "A plan id was left unreadable")
@@ -187,8 +189,8 @@ extension AppDelegate {
         precondition(codex.planName == "Pro Lite", "Codex's plan read as one word")
 
         viewModel.useRenderingFixtures([.claude])
-        viewModel.usageData.planName = "Max 20x"
-        precondition(panelCards().first { $0.provider == .claude }?.detail == "Max 20x", "Claude's card hid its plan")
+        viewModel.usageData.planName = "Ultra"
+        precondition(panelCards().first { $0.provider == .claude }?.detail == "Ultra", "Claude's card hid its plan")
         viewModel.usageData.planName = nil
         precondition(panelCards().first { $0.provider == .claude }?.detail == "via OAuth", "Claude's card lost its fallback")
     }

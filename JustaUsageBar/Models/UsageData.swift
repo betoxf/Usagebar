@@ -56,7 +56,7 @@ nonisolated struct UsageData {
     var fableUsed: Int?
     var fableResetAt: Date?
 
-    // Plan, such as "Max 20x" (unknown for a browser session)
+    // Plan, such as "Ultra" (unknown for a browser session)
     var planName: String?
 
     var fiveHourPercentage: Double {

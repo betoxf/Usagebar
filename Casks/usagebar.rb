@@ -1,12 +1,12 @@
 # frozen_string_literal: true
 
 cask "usagebar" do
-  version "1.11.3"
-  sha256 "c31bac4197829d06f99e96ebde366fd3e47d2c59057da5c846daa774b56bf6aa"
+  version "1.12.1"
+  sha256 "3063289262b30358b8a50494f5c9630430895192c949bc71df856bb15c6eb97a"
 
   url "https://github.com/betoxf/Usagebar/releases/download/v#{version}/Usagebar.zip"
   name "Usagebar"
-  desc "Menu bar app showing Claude, Codex, and KimiCode usage statistics"
+  desc "Menu bar app showing Claude, Codex, and Kimi Code usage statistics"
   homepage "https://github.com/betoxf/Usagebar"
 
   depends_on macos: :sonoma

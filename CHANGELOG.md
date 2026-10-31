@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.0](https://github.com/betoxf/Usagebar/releases/tag/v1.12.0) — 2026-10-31
+
+- Set up in one window. If Usagebar finds no sign-in on first launch, the window opens by itself. Click **Sign In** next to each tool you use, and it shows **Connected** on its own, with no Refresh. The old window that asked for a session cookie from DevTools is gone.
+- Show the Usagebar logo above **Setup** in the menu bar until something is connected, and add **Connect More Tools…** under the panel's **⋯** button.
+- Show Claude's plan on its card, such as Pro, Max, or Ultra, instead of how you signed in. Codex reads Pro Lite instead of Prolite, z.ai shows its plan when it reports one, and XAI no longer shows an email address where the plan goes.
+- Use Kimi Code's official logo, color, and name.
+
 ## [1.11.3](https://github.com/betoxf/Usagebar/releases/tag/v1.11.3) — 2026-10-31
 
 - Hide Claude's five-hour limit on plans that no longer have one. The menu bar and panel show the weekly limit alone instead of a 5h reading of 0%, and plans that still have the five-hour limit look the same as before.

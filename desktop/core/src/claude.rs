@@ -392,6 +392,8 @@ fn is_expired_oauth_response(body: &[u8]) -> bool {
 }
 
 /// Windows in the macOS menu's order: 5h, 7d, then Fable when present.
+/// Accounts without a 5h limit report no 5h number and get no 5h window. A
+/// null `resets_at` doesn't mean that: an unused 5h window has one too.
 fn parse_usage(data: &[u8]) -> Result<Vec<UsageWindow>, UsageError> {
     let json: Value =
         serde_json::from_slice(data).map_err(|_| UsageError::Parse("invalid JSON".into()))?;
@@ -404,15 +406,17 @@ fn parse_usage(data: &[u8]) -> Result<Vec<UsageWindow>, UsageError> {
         let window = json.get(key).and_then(Value::as_object);
         let used = window
             .and_then(|w| w.get("utilization"))
-            .and_then(Value::as_f64)
-            .map_or(0, whole_percent);
+            .and_then(Value::as_f64);
+        if used.is_none() && key == "five_hour" {
+            continue;
+        }
         let resets_at = window
             .and_then(|w| w.get("resets_at"))
             .and_then(Value::as_str)
             .and_then(parse_date);
         windows.push(UsageWindow {
             label: label.into(),
-            used_percent: used,
+            used_percent: used.map_or(0, whole_percent),
             resets_at,
         });
     }
@@ -691,11 +695,7 @@ mod tests {
             ]
         }"#;
         let windows = parse_usage(json).unwrap();
-        let summary: Vec<(&str, u8)> = windows
-            .iter()
-            .map(|w| (w.label.as_str(), w.used_percent))
-            .collect();
-        assert_eq!(summary, [("5h", 42), ("7d", 18), ("Fable", 63)]);
+        assert_eq!(summary(&windows), [("5h", 42), ("7d", 18), ("Fable", 63)]);
         assert_eq!(
             windows[0].resets_at,
             Some(at("2026-01-01T05:00:00.123456Z"))
@@ -731,20 +731,68 @@ mod tests {
 
         let named = br#"{"seven_day_fable": {"utilization": 12}}"#;
         let windows = parse_usage(named).unwrap();
-        assert_eq!(windows[2].used_percent, 12);
-        assert_eq!(windows[2].resets_at, None);
+        assert_eq!(windows[1].label, "Fable");
+        assert_eq!(windows[1].used_percent, 12);
+        assert_eq!(windows[1].resets_at, None);
+    }
+
+    fn summary(windows: &[UsageWindow]) -> Vec<(&str, u8)> {
+        windows
+            .iter()
+            .map(|w| (w.label.as_str(), w.used_percent))
+            .collect()
     }
 
     #[test]
-    fn usage_without_fable_or_numbers_shows_zeroed_5h_and_7d() {
+    fn usage_without_fable_or_numbers_shows_only_a_zeroed_7d() {
         let windows =
             parse_usage(br#"{"five_hour": null, "seven_day": {"utilization": null}}"#).unwrap();
-        let summary: Vec<(&str, u8)> = windows
-            .iter()
-            .map(|w| (w.label.as_str(), w.used_percent))
-            .collect();
-        assert_eq!(summary, [("5h", 0), ("7d", 0)]);
+        assert_eq!(summary(&windows), [("7d", 0)]);
         assert!(windows.iter().all(|w| w.resets_at.is_none()));
+    }
+
+    #[test]
+    fn account_without_a_5h_window_shows_7d_and_fable() {
+        let json = br#"{
+            "five_hour": null,
+            "seven_day": {"utilization": 31.6, "resets_at": "2026-01-07T00:00:00Z"},
+            "limits": [
+                {"type": "weekly_all", "percent": 31.6, "resets_at": "2026-01-07T00:00:00Z"},
+                {"type": "weekly_scoped", "scope": {"model": {"display_name": "Fable"}}, "percent": 12.9}
+            ]
+        }"#;
+        let windows = parse_usage(json).unwrap();
+        assert_eq!(summary(&windows), [("7d", 31), ("Fable", 12)]);
+        assert_eq!(windows[0].resets_at, Some(at("2026-01-07T00:00:00Z")));
+    }
+
+    #[test]
+    fn account_without_a_5h_window_or_fable_shows_only_7d() {
+        let json = br#"{"five_hour": null, "seven_day": {"utilization": 31.6, "resets_at": null}}"#;
+        assert_eq!(summary(&parse_usage(json).unwrap()), [("7d", 31)]);
+
+        let missing = br#"{"seven_day": {"utilization": 31.6, "resets_at": null}}"#;
+        assert_eq!(summary(&parse_usage(missing).unwrap()), [("7d", 31)]);
+    }
+
+    #[test]
+    fn reset_time_alone_does_not_make_a_5h_window() {
+        let json = br#"{
+            "five_hour": {"utilization": null, "resets_at": "2026-01-01T05:00:00Z"},
+            "seven_day": {"utilization": 9, "resets_at": null}
+        }"#;
+        assert_eq!(summary(&parse_usage(json).unwrap()), [("7d", 9)]);
+    }
+
+    #[test]
+    fn unused_5h_window_with_no_reset_keeps_its_row() {
+        let json = br#"{
+            "five_hour": {"utilization": 0, "resets_at": null},
+            "seven_day": {"utilization": 9, "resets_at": null}
+        }"#;
+        let windows = parse_usage(json).unwrap();
+        assert_eq!(summary(&windows), [("5h", 0), ("7d", 9)]);
+        assert_eq!(windows[0].resets_at, None);
     }
 
     #[test]

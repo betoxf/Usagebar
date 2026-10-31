@@ -210,18 +210,23 @@ fn update_tray(app: &AppHandle, snapshot: &Snapshot) {
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
         return;
     };
-    let shown = snapshot
-        .tray_provider
-        .and_then(|p| snapshot.providers.iter().find(|s| s.provider == p));
-    let headline = shown
-        .and_then(|s| s.usage.as_ref())
-        .and_then(|u| u.windows.first())
-        .map(|w| w.used_percent);
-
-    let (pixels, size) = tray_art::render(snapshot.tray_provider, headline, &tray_theme());
+    let (pixels, size) =
+        tray_art::render(snapshot.tray_provider, headline(snapshot), &tray_theme());
     let _ = tray.set_icon(Some(tauri::image::Image::new_owned(pixels, size, size)));
     let _ = tray.set_icon_as_template(cfg!(target_os = "macos"));
     let _ = tray.set_tooltip(Some(tooltip(snapshot)));
+}
+
+/// The number on the tray ring: the shown provider's first window, so weekly
+/// for a Claude account without a 5h window.
+fn headline(snapshot: &Snapshot) -> Option<u8> {
+    let shown = snapshot
+        .tray_provider
+        .and_then(|p| snapshot.providers.iter().find(|s| s.provider == p));
+    shown
+        .and_then(|s| s.usage.as_ref())
+        .and_then(|u| u.windows.first())
+        .map(|w| w.used_percent)
 }
 
 /// "Claude 5h 11% · 7d 46%", one line per provider.
@@ -433,4 +438,53 @@ fn fit_flyout(window: WebviewWindow, height: f64) {
 #[tauri::command]
 fn quit(app: AppHandle) {
     app.exit(0);
+}
+
+#[cfg(test)]
+mod tests {
+    use usagebar_core::UsageWindow;
+
+    use super::*;
+
+    fn claude_snapshot(windows: &[(&str, u8)]) -> Snapshot {
+        Snapshot {
+            providers: vec![ProviderState {
+                provider: Provider::Claude,
+                name: Provider::Claude.name(),
+                usage: Some(ProviderUsage {
+                    provider: Provider::Claude,
+                    detail: None,
+                    windows: windows
+                        .iter()
+                        .map(|(label, used_percent)| UsageWindow {
+                            label: (*label).into(),
+                            used_percent: *used_percent,
+                            resets_at: None,
+                        })
+                        .collect(),
+                }),
+                error: None,
+            }],
+            tray_provider: Some(Provider::Claude),
+            updated_at: None,
+        }
+    }
+
+    #[test]
+    fn tray_leads_with_5h_when_the_account_has_it() {
+        let snapshot = claude_snapshot(&[("5h", 11), ("7d", 46)]);
+        assert_eq!(headline(&snapshot), Some(11));
+        assert_eq!(tooltip(&snapshot), "Claude 5h 11% · 7d 46%");
+    }
+
+    #[test]
+    fn tray_falls_back_to_7d_without_a_5h_window() {
+        let snapshot = claude_snapshot(&[("7d", 46)]);
+        assert_eq!(headline(&snapshot), Some(46));
+        assert_eq!(tooltip(&snapshot), "Claude 7d 46%");
+
+        let snapshot = claude_snapshot(&[("7d", 46), ("Fable", 12)]);
+        assert_eq!(headline(&snapshot), Some(46));
+        assert_eq!(tooltip(&snapshot), "Claude 7d 46% · Fable 12%");
+    }
 }

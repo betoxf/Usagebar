@@ -61,7 +61,7 @@ extension AppDelegate {
             currentProvider = .claude
             updateStatusImage()
             precondition(statusItem.button?.image === first, "Provider cache missed on return")
-            viewModel.usageData.fiveHourUsed += 1
+            viewModel.usageData.fiveHourUsed? += 1
             updateStatusImage()
             precondition(statusItem.button?.image !== first, "Changed usage kept the old image")
 
@@ -90,6 +90,21 @@ extension AppDelegate {
         viewModel.codexUsageData.primaryWindowSeconds = 7 * 24 * 3600
         updateStatusImage()
         precondition(statusItem.button?.image?.size.width == 50, "Weekly Codex window duplicated")
+
+        // A Claude plan without a 5-hour window shows the weekly value alone.
+        currentProvider = .claude
+        viewModel.showOnly5hr = true
+        viewModel.usageData = UsageData(weeklyUsed: 29)
+        updateStatusImage()
+        precondition(statusItem.button?.image?.size.width == 50, "Claude kept a slot for a 5-hour window it lacks")
+        precondition(panelCards().first { $0.provider == .claude }?.rows.map(\.label) == ["7d"],
+                     "Claude showed a 5-hour window it lacks")
+        viewModel.showOnly5hr = false
+        viewModel.usageData.fiveHourUsed = 0
+        updateStatusImage()
+        precondition(statusItem.button?.image?.size.width == 80, "An unused 5-hour window was hidden")
+        precondition(panelCards().first { $0.provider == .claude }?.rows.map(\.label) == ["5h", "7d"],
+                     "An unused 5-hour window was hidden")
 
         // Follow Active App keeps the last AI tool on screen instead of the saved pick.
         viewModel.followActiveApp = true
@@ -155,6 +170,6 @@ struct StatusRenderingTests {
         let model = UsageViewModel(startAutomatically: false)
         let output = ProcessInfo.processInfo.environment["USAGEBAR_RENDER_OUTPUT"].map { URL(fileURLWithPath: $0) }
         try AppDelegate(viewModel: model).verifyRendering(output: output)
-        print("PASS: setup/Claude/Codex menus, closed-menu reuse, status image caching, light/dark rendering, focus following, shared Cursor plan")
+        print("PASS: setup/Claude/Codex menus, closed-menu reuse, status image caching, light/dark rendering, Claude without a 5-hour window, focus following, shared Cursor plan")
     }
 }

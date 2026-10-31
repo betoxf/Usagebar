@@ -686,10 +686,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             if viewModel.hasClaudeCredentials {
                 let usage = viewModel.usageData
-                var rows = [
-                    UsagePanelRow(label: "5h", percent: usage.fiveHourUsed, resetText: usage.timeUntilFiveHourReset),
-                    UsagePanelRow(label: "7d", percent: usage.weeklyUsed, resetText: usage.timeUntilWeeklyReset)
-                ]
+                var rows: [UsagePanelRow] = []
+                if let fiveHour = usage.fiveHourUsed {
+                    rows.append(UsagePanelRow(label: "5h", percent: fiveHour, resetText: usage.timeUntilFiveHourReset))
+                }
+                rows.append(UsagePanelRow(label: "7d", percent: usage.weeklyUsed, resetText: usage.timeUntilWeeklyReset))
                 if usage.hasFableData {
                     rows.append(UsagePanelRow(label: "Fable", percent: usage.fableUsed ?? 0, resetText: usage.timeUntilFableReset))
                 }
@@ -1780,9 +1781,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let label: String
         switch currentProvider {
         case .claude:
-            primary = viewModel.usageData.fiveHourUsed
-            secondary = viewModel.usageData.weeklyUsed
-            label = "5h"
+            primary = viewModel.usageData.weeklyUsed
+            secondary = viewModel.usageData.fiveHourUsed
+            label = "7d"
         case .codex:
             primary = viewModel.codexUsageData.primaryUsedPercent
             secondary = viewModel.codexUsageData.primaryIsWeekly ? nil : viewModel.codexUsageData.secondaryUsedPercent
@@ -2235,8 +2236,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func createClaudeImage() -> (NSImage, CGFloat) {
         let showIcon = viewModel.showIcon
-        let showOnly5hr = viewModel.showOnly5hr
-        let showOnlyWeekly = viewModel.showOnlyWeekly
+        // Plans without a 5-hour window show a single "W X%" like the other
+        // one-value providers.
+        let fiveHour = viewModel.usageData.fiveHourUsed
+        let showOnly5hr = viewModel.showOnly5hr && fiveHour != nil
+        let showOnlyWeekly = viewModel.showOnlyWeekly || fiveHour == nil
 
         var width: CGFloat = 80
         if showOnly5hr || showOnlyWeekly { width = 50 }
@@ -2272,11 +2276,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             yOffset = 3
         }
 
-        let fiveHour = viewModel.usageData.fiveHourUsed
         let weekly = viewModel.usageData.weeklyUsed
 
         let fiveHourColor = usageHighlightColor(
-            percentage: fiveHour,
+            percentage: fiveHour ?? 0,
             highThreshold: 90,
             accentColor: brandClaudeColor,
             fallback: textColor
@@ -2312,7 +2315,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let valuesString = NSMutableAttributedString()
 
-        if !showOnlyWeekly {
+        if !showOnlyWeekly, let fiveHour {
             valuesString.append(NSAttributedString(string: "5h ", attributes: tinyLabelAttributes))
             valuesString.append(NSAttributedString(string: "\(fiveHour)", attributes: number5hAttributes))
             valuesString.append(NSAttributedString(string: "%", attributes: percent5hAttributes))

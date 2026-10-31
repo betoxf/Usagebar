@@ -33,7 +33,7 @@
 
 ## Why Usagebar
 
-Usage limits matter most while you are working. Usagebar keeps your Claude Code, Codex, and Cursor limits (the current five-hour window and the weekly allowance) visible in the menu bar, then gets out of the way. Right-click it for a panel with every provider, a meter for each limit, and its reset time.
+Usage limits matter most while you are working. Usagebar keeps your Claude Code, Codex, and Cursor limits (the weekly allowance, plus the current five-hour window on plans that have one) visible in the menu bar, then gets out of the way. Right-click it for a panel with every provider, a meter for each limit, and its reset time.
 
 | Capability | What it gives you |
 | --- | --- |
@@ -131,7 +131,7 @@ Right-click the status item to open the usage panel; its **⋯** button holds th
 ## FAQ
 
 **How do I check my Claude Code usage limit on a Mac?**
-Install Usagebar and sign in to Claude Code as usual (`claude login`). The menu bar shows your five-hour window and weekly usage; the panel adds the Fable limit when your plan has one, and when each resets.
+Install Usagebar and sign in to Claude Code as usual (`claude login`). The menu bar shows your weekly usage, plus your five-hour window when your plan has one; the panel adds the Fable limit when your plan has one, and when each resets.
 
 **Can I see my Codex or ChatGPT rate limits?**
 Yes. Usagebar reads the Codex CLI sign-in (`codex login`) and shows the Codex primary and weekly windows with their reset times.

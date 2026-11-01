@@ -31,6 +31,8 @@ import Foundation
         concurrent += 1
         peakConcurrent = max(peakConcurrent, concurrent)
         defer { concurrent -= 1; inFlight.remove(provider) }
+        // The first request waits for a second, so a slow start can't decide whether they overlap.
+        for _ in 0..<1000 where peakConcurrent < 2 { try? await Task.sleep(nanoseconds: 10_000_000) }
         // Deliberately return even after cancellation to test the controller's guard.
         try? await Task.sleep(nanoseconds: delay)
         if let error = failures[provider] { throw error }

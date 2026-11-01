@@ -192,6 +192,31 @@ extension AppDelegate {
         precondition(Service.credential(harness: foreign, config: "") == nil, "A private deployment's token would reach DeepSeek")
         precondition(Service.credential(harness: "", config: "") == nil, "A credential appeared from nothing")
 
+        // Another provider's key must never reach DeepSeek.
+        let grant = Service.Credential.account("account-token")
+        for config in [
+            "[providers.openrouter]\napi_key = \"sk-or\"\n",
+            "provider = \"nvidia-nim\"\napi_key = \"sk-nim\"\n",
+            "base_url = \"https://openrouter.ai/api/v1\"\napi_key = \"sk-or\"\n",
+            "base_url = \"https://deepseek.com.example.net\"\napi_key = \"sk-or\"\n"
+        ] {
+            precondition(Service.credential(harness: harness, config: config) == grant, "Another provider's key would reach DeepSeek")
+        }
+        let inRecord = harness + "\n  other-plugin/key:\n    payload:\n      DEEPSEEK_API_KEY: sk-theirs\n"
+        precondition(Service.credential(harness: inRecord, config: "") == grant, "Another plugin's record was read as Harness's key")
+        precondition(Service.credential(harness: harness, config: "base_url = \"https://api.deepseek.com\"\napi_key = \"sk-ours\"\n") == .apiKey("sk-ours"),
+                     "DeepSeek's own base URL hid the key")
+
+        // Values are read as their format means them.
+        precondition(Service.credential(harness: "", config: "api_key = \"sk-real\" # work\n") == .apiKey("sk-real"), "A comment joined the key")
+        precondition(Service.credential(harness: "", config: "api_key = sk-bare # work\n") == .apiKey("sk-bare"), "A comment joined the key")
+        for empty in ["null", "~", "\"\"", ">-"] {
+            precondition(Service.credential(harness: "version: 1\nsecrets:\n  DEEPSEEK_API_KEY: \(empty)\n" + harness, config: "") == grant,
+                         "An empty value was read as a key")
+        }
+        precondition(Service.credential(harness: harness.replacingOccurrences(of: "token: account-token", with: "token: >-"), config: "") == nil,
+                     "A YAML marker was read as a token")
+
         func data(_ text: String) -> Data { Data(text.utf8) }
         let keyed = try? Service.parseBalance(data("""
         {"is_available": true, "balance_infos": [
@@ -220,8 +245,14 @@ extension AppDelegate {
         precondition(rejected, "A rejected sign-in was not reported as one")
         precondition((try? Service.parseAccountSummary(data("{\"code\": 0, \"data\": {\"biz_code\": 5}}"))) == nil, "A failure became a balance")
         precondition((try? Service.parseBalance(data("{\"error\": {}}"))) == nil, "A failure became a balance")
-        let bad = try? Service.parseBalance(data("{\"balance_infos\": [{\"currency\": \"USD\", \"total_balance\": \"nan\"}]}"))
-        precondition(bad?.balanceText == "--", "A malformed amount was shown")
+        // A changed payload is a failure, which keeps the last amount on screen.
+        precondition((try? Service.parseBalance(data("{\"balance_infos\": [{\"currency\": \"USD\", \"total_balance\": \"nan\"}]}"))) == nil,
+                     "A malformed amount was shown")
+        precondition((try? Service.parseBalance(data("{\"balance_infos\": [{\"currency\": \"USD\", \"total\": \"5.00\"}]}"))) == nil,
+                     "A renamed field read as an empty balance")
+        precondition((try? Service.parseAccountSummary(data("""
+        {"code": 0, "data": {"biz_code": 0, "biz_data": {"normal_wallets": [{"currency": "USD", "amount": "5"}], "bonus_wallets": []}}}
+        """))) == nil, "A renamed wallet field read as an empty balance")
 
         // A dialog here would hang the run, so this also proves the rows open in place.
         _ = setupModel.update(available: [])

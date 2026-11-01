@@ -98,10 +98,36 @@ final class DeepSeekAPIService {
 
     /// An API key comes first because its endpoint is the documented one.
     nonisolated static func credential(harness: String, config: String) -> Credential? {
-        if let key = value(of: "DEEPSEEK_API_KEY", in: harness) ?? value(of: "api_key", in: config) {
+        if let key = harnessKey(in: harness) ?? configKey(in: config) {
             return .apiKey(key)
         }
         return accountToken(in: harness).map { .account($0) }
+    }
+
+    /// Harness keeps its stored keys outside `records:`, whose entries belong to other plugins.
+    nonisolated private static func harnessKey(in harness: String) -> String? {
+        var section = ""
+        let stored = harness.split(whereSeparator: \.isNewline).filter { line in
+            if !line.hasPrefix(" ") { section = String(line) }
+            return section != "records:"
+        }
+        return value(of: "DEEPSEEK_API_KEY", in: stored.joined(separator: "\n"))
+    }
+
+    /// `deepseek-tui` also holds other providers' keys, and a key must never
+    /// reach the wrong provider, so only a top-level key set up for DeepSeek counts.
+    nonisolated private static func configKey(in config: String) -> String? {
+        let topLevel = config.split(whereSeparator: \.isNewline)
+            .prefix { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("[") }
+            .joined(separator: "\n")
+        if let provider = value(of: "provider", in: topLevel), provider != "deepseek" {
+            return nil
+        }
+        if let baseURL = value(of: "base_url", in: topLevel) {
+            guard let host = URL(string: baseURL)?.host?.lowercased(),
+                  host == "deepseek.com" || host.hasSuffix(".deepseek.com") else { return nil }
+        }
+        return value(of: "api_key", in: topLevel)
     }
 
     /// Harness also accepts private deployments, whose tokens must not reach DeepSeek.
@@ -118,14 +144,21 @@ final class DeepSeekAPIService {
         return value(of: "token", in: record)
     }
 
-    /// The first `name: value` (YAML) or `name = "value"` (TOML) line.
+    /// The first usable `name: value` (YAML) or `name = "value"` (TOML) line.
     nonisolated private static func value(of name: String, in text: String) -> String? {
         for line in text.split(whereSeparator: \.isNewline) {
             guard let separator = line.firstIndex(where: { $0 == ":" || $0 == "=" }),
                   line[..<separator].trimmingCharacters(in: .whitespaces) == name else { continue }
-            let value = line[line.index(after: separator)...]
-                .trimmingCharacters(in: CharacterSet(charactersIn: "\"' \t"))
-            if !value.isEmpty { return value }
+            var value = line[line.index(after: separator)...].trimmingCharacters(in: .whitespaces)
+            if let quote = value.first, quote == "\"" || quote == "'" {
+                value = String(value.dropFirst().prefix { $0 != quote })
+            } else {
+                value = (value.components(separatedBy: " #").first ?? "").trimmingCharacters(in: .whitespaces)
+            }
+            // YAML's empty values and block markers aren't the value itself.
+            if !value.isEmpty, value != "null", value != "~", !value.hasPrefix(">"), !value.hasPrefix("|") {
+                return value
+            }
         }
         return nil
     }
@@ -181,9 +214,10 @@ final class DeepSeekAPIService {
         }
         var usage = DeepSeekUsageData()
         usage.isAvailable = json["is_available"] as? Bool ?? true
-        usage.balances = infos.compactMap { info in
+        // A renamed field must read as a failure, never as an empty balance.
+        usage.balances = try infos.map { info in
             guard let currency = info["currency"] as? String, let total = amount(info["total_balance"]) else {
-                return nil
+                throw invalidResponse
             }
             return DeepSeekBalance(currency: currency, total: total, granted: amount(info["granted_balance"]) ?? 0)
         }
@@ -212,7 +246,7 @@ final class DeepSeekAPIService {
         for (wallets, isBonus) in [(normal, false), (bonus, true)] {
             for wallet in wallets {
                 guard let currency = wallet["currency"] as? String, let amount = amount(wallet["balance"]) else {
-                    continue
+                    throw invalidResponse
                 }
                 if !balances.contains(where: { $0.currency == currency }) {
                     balances.append(DeepSeekBalance(currency: currency, total: 0, granted: 0))

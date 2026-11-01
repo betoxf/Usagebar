@@ -578,10 +578,16 @@ final class UsageViewModel: ObservableObject {
         })
     }
 
+    /// A new key starts clean, so it neither shows the old account's reading nor
+    /// waits out the old key's cooldown.
     func saveDeepSeekAPIKey(_ key: String) {
-        changeCredentials {
+        changeCredentials({
             CredentialStorage.shared.setDeepSeekAPIKey(key.trimmingCharacters(in: .whitespacesAndNewlines))
-        }
+        }, reset: {
+            self.deepseekUsageData = .placeholder
+            self.deepseekError = nil
+            self.refreshStates[.deepseek] = nil
+        })
     }
 
     func clearDeepSeekAPIKey() {
@@ -595,9 +601,13 @@ final class UsageViewModel: ObservableObject {
     }
 
     func saveZaiAPIKey(_ key: String) {
-        changeCredentials {
+        changeCredentials({
             CredentialStorage.shared.setZaiAPIKey(key.trimmingCharacters(in: .whitespacesAndNewlines))
-        }
+        }, reset: {
+            self.zaiUsageData = .placeholder
+            self.zaiError = nil
+            self.refreshStates[.zai] = nil
+        })
     }
 
     func clearZaiAPIKey() {

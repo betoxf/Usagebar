@@ -10,6 +10,11 @@ extension UsageViewModel {
             refreshStates[provider, default: .init()].succeeded(at: Date())
         }
     }
+
+    fileprivate func useSavedKeyFixtures(_ saved: Bool) {
+        hasSavedDeepSeekKey = saved
+        hasSavedZaiKey = saved
+    }
 }
 
 extension AppDelegate {
@@ -232,6 +237,16 @@ extension AppDelegate {
 
         viewModel.useRenderingFixtures([.deepseek])
         viewModel.showDeepSeek = true
+        viewModel.useSavedKeyFixtures(true)
+        menuWillOpen(menu)
+        precondition(menu.items.contains { $0.title == "Forget Saved DeepSeek Key" } && menu.items.contains { $0.title == "Forget Saved z.ai Key" },
+                     "A saved key could not be forgotten")
+        menuDidClose(menu)
+        viewModel.useSavedKeyFixtures(false)
+        menuWillOpen(menu)
+        precondition(!menu.items.contains { $0.title.hasPrefix("Forget Saved") }, "Forget appeared with nothing saved")
+        menuDidClose(menu)
+
         viewModel.deepseekUsageData = keyed ?? .placeholder
         var row = panelCards().first { $0.provider == .deepseek }?.rows.first
         precondition(row?.amount == "$12.30" && row?.resetText == "$2.00 granted", "The card hid the amount left")

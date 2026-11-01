@@ -21,6 +21,7 @@ import Foundation
         probes += 1
         return available.contains(provider)
     }
+    static func setAvailable(_ value: Set<DisplayProvider>) { available = value }
     static func setDelay(_ value: UInt64) { delay = value }
     static func setError(_ value: APIError, for provider: DisplayProvider) { failures[provider] = value }
     static func fetch(_ provider: DisplayProvider) async throws -> Int {

@@ -14,6 +14,7 @@ struct PerformanceRegressionTests {
         testRetryAfter()
         testTimerLifetime()
         try await testViewModel()
+        try await testRejectedKeys()
         testTerminalCommands()
         try await testTerminalSessionScan()
         await testProviderHTTP()
@@ -185,6 +186,21 @@ struct PerformanceRegressionTests {
         model.showCodex = false
         model.showKimi = false
         check(model.refreshTargets == [.claude], "All-hidden fallback disappeared")
+    }
+
+    @MainActor static func testRejectedKeys() async throws {
+        await FakeProviders.reset()
+        await FakeProviders.setAvailable([.deepseek, .zai])
+        await FakeProviders.setError(.unauthorized, for: .deepseek)
+        await FakeProviders.setError(.unauthorized, for: .zai)
+        let model = UsageViewModel(startAutomatically: false)
+        defer { model.stopAutoRefresh() }
+        model.showDeepSeek = true
+        model.showZai = true
+        await model.refresh()
+        check(model.deepseekError == "DeepSeek rejected this key or sign-in", "A rejected DeepSeek key read as an expired session")
+        check(model.zaiError == "z.ai rejected this key", "A rejected z.ai key read as an expired session")
+        await FakeProviders.setAvailable([.claude, .codex, .kimi])
     }
 
     static func testTerminalCommands() {

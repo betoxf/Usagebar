@@ -244,7 +244,8 @@ private struct APIKeyEntry: View {
                     .accessibilityLabel("Save \(name) API key")
             }
         }
-        .onAppear { isFieldFocused = true }
+        // Focus set during onAppear is lost, because the field isn't in the window yet.
+        .onAppear { DispatchQueue.main.async { isFieldFocused = true } }
     }
 
     private func save() {

@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.13.0](https://github.com/betoxf/Usagebar/releases/tag/v1.13.0) — 2026-11-01
+
+- Add DeepSeek, with its official logo. It's prepaid, so the menu bar and panel show the amount you have left, and the card lists granted credits beside it. Usagebar finds a DeepSeek Harness sign-in on its own, or uses an API key.
+- Add API keys right in the setup window. **Add Key** on the z.ai and DeepSeek rows opens the row with a field, **Paste**, and **Save**, and the key is encrypted on your Mac. **Forget Saved z.ai Key** and **Forget Saved DeepSeek Key** remove it. z.ai no longer sends you to edit a config file.
+- Say so when z.ai or DeepSeek rejects a key, with a link to replace it, instead of "Session expired".
+
 ## [1.12.2](https://github.com/betoxf/Usagebar/releases/tag/v1.12.2) — 2026-10-31
 
 - Keep Cursor's last weekly reading when its weekly usage can't be read, instead of falling back to the monthly figure, which could show a spent allowance as 0%. The card notes that the reading couldn't be refreshed, and the reading is dropped at its reset time.

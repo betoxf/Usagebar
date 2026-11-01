@@ -245,45 +245,70 @@ struct PerformanceRegressionTests {
     /// A keychain dialog must never hold up the caller, be stacked, or be raised again after a refusal.
     static func testKeychainTool() throws {
         // Stands in for /usr/bin/security: answers at once, or only after the
-        // user has dealt with a dialog.
+        // user has dealt with a dialog. That takes answerDialog, not time, so a
+        // slow start on a busy Mac decides nothing. A dialog nobody answers closes
+        // after 20 seconds or more, so waiting for one fails a check, not the run.
         let stub = FileManager.default.temporaryDirectory.appendingPathComponent("usagebar-security-\(getpid())")
+        let answered = stub.path + ".answered"
         try """
         #!/bin/sh
+        dialog() {
+            i=0
+            until [ -e "$0.answered" ] || [ $((i += 1)) -gt 2000 ]; do sleep 0.01; done
+            rm -f "$0.answered"
+        }
         case "$3" in
             trusted) echo " secret " ;;
             missing) exit 44 ;;
-            allowed) sleep 1; echo later ;;
-            refused) sleep 1; exit 128 ;;
+            allowed) dialog; echo later ;;
+            refused) dialog; exit 128 ;;
         esac
         """.write(to: stub, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: stub.path)
         defer { try? FileManager.default.removeItem(at: stub) }
 
-        func answer(_ tool: KeychainTool, _ service: String) -> String? {
-            for _ in 0..<300 {
+        /// Returns once the stub has taken the answer, however late it started.
+        func answerDialog() {
+            FileManager.default.createFile(atPath: answered, contents: nil)
+            for _ in 0..<3000 {
+                guard FileManager.default.fileExists(atPath: answered) else { return }
+                usleep(10_000)
+            }
+        }
+
+        func answer(_ tool: KeychainTool, _ service: String, refreshing: Bool = false) -> String? {
+            for _ in 0..<3000 {
+                if refreshing { tool.reset() }
                 if let password = tool.password(service: service, account: "me") { return password }
                 usleep(10_000)
             }
             return nil
         }
 
-        let tool = KeychainTool(executable: stub.path, patience: 0.3)
-        check(tool.password(service: "trusted", account: "me") == "secret", "Trusted read failed")
-        check(tool.password(service: "missing", account: "") == nil, "Read an item that does not exist")
-        check(tool.password(service: "trusted", account: "") == "secret", "A missing item counted as a refusal")
+        // A read that needs no dialog ends before this patience does, so it only
+        // limits a failure and a slow start can't turn the read into a dialog.
+        let patient = KeychainTool(executable: stub.path, patience: 60)
+        check(patient.password(service: "trusted", account: "me") == "secret", "Trusted read failed")
+        check(patient.password(service: "missing", account: "") == nil, "Read an item that does not exist")
+        check(patient.password(service: "trusted", account: "") == "secret", "A missing item counted as a refusal")
 
+        let tool = KeychainTool(executable: stub.path, patience: 0.3)
         let asked = Date()
         check(tool.password(service: "allowed", account: "me") == nil, "Read a secret before it was allowed")
-        check(Date().timeIntervalSince(asked) < 0.9, "Waited for the keychain dialog")
+        check(Date().timeIntervalSince(asked) < 10, "Waited for the keychain dialog")
         check(tool.password(service: "trusted", account: "me") == nil, "Stacked a second dialog")
+        answerDialog()
         check(answer(tool, "allowed") == "later", "Lost the answer to the dialog")
 
         check(tool.password(service: "refused", account: "me") == nil, "Read a secret before it was allowed")
-        usleep(1_300_000)
-        check(tool.password(service: "trusted", account: "me") == nil, "Asked again after a refusal")
-        check(tool.password(service: "trusted", account: "me") == nil, "Asked again after a refusal")
-        tool.reset()
-        check(tool.password(service: "trusted", account: "me") == "secret", "Refresh could not ask again")
+        answerDialog()
+        // Nothing shows when the tool sees the refusal, so keep asking past that
+        // point, and refresh on every read in case it is later still.
+        for _ in 0..<100 {
+            check(tool.password(service: "trusted", account: "me") == nil, "Asked again after a refusal")
+            usleep(10_000)
+        }
+        check(answer(tool, "trusted", refreshing: true) == "secret", "Refresh could not ask again")
     }
 
     /// Overlapping and repeated requests must never reach a session that was already closed.

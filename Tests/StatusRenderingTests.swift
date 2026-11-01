@@ -63,6 +63,7 @@ extension AppDelegate {
 
         verifyPlanNames()
         verifyCursorOutage()
+        verifyDeepSeek()
 
         viewModel.useRenderingFixtures([.claude, .codex])
         let sheet = NSImage(size: NSSize(width: 560, height: 240))
@@ -159,6 +160,95 @@ extension AppDelegate {
            let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
             try png.write(to: output)
         }
+    }
+
+    private func verifyDeepSeek() {
+        let harness = """
+        version: 1
+        records:
+          client-connection/browser-session:
+            kind: grant
+            payload:
+              token: not-this-one
+          deepseek-account-platform/default:
+            kind: grant
+            payload:
+              version: 1
+              token: account-token
+              issuer: https://platform.deepseek.com
+        """
+        typealias Service = DeepSeekAPIService
+        precondition(Service.credential(harness: harness, config: "") == .account("account-token"), "Harness's sign-in was missed")
+        precondition(Service.credential(harness: "version: 1\nsecrets:\n  DEEPSEEK_API_KEY: sk-stored\n" + harness, config: "") == .apiKey("sk-stored"),
+                     "A key saved in Harness lost to its sign-in")
+        precondition(Service.credential(harness: harness, config: "api_key = \"sk-config\"\n") == .apiKey("sk-config"),
+                     "The config file's key was missed")
+        let foreign = harness.replacingOccurrences(of: "https://platform.deepseek.com", with: "https://deepseek.example.com")
+        precondition(Service.credential(harness: foreign, config: "") == nil, "A private deployment's token would reach DeepSeek")
+        precondition(Service.credential(harness: "", config: "") == nil, "A credential appeared from nothing")
+
+        func data(_ text: String) -> Data { Data(text.utf8) }
+        let keyed = try? Service.parseBalance(data("""
+        {"is_available": true, "balance_infos": [
+          {"currency": "CNY", "total_balance": "0.00", "granted_balance": "0.00", "topped_up_balance": "0.00"},
+          {"currency": "USD", "total_balance": "12.30", "granted_balance": "2.00", "topped_up_balance": "10.30"}
+        ]}
+        """))
+        precondition(keyed?.isAvailable == true && keyed?.balanceText == "$12.30", "An empty currency hid the balance")
+        precondition(keyed?.shownBalances.count == 1 && keyed?.shownBalances.first?.grantedText == "$2.00", "Granted credits were misread")
+
+        let account = try? Service.parseAccountSummary(data("""
+        {"code": 0, "msg": "", "data": {"biz_code": 0, "biz_data": {
+          "normal_wallets": [{"currency": "USD", "balance": "5.0000000000000000"}, {"currency": "CNY", "balance": "0E-16"}],
+          "bonus_wallets": [{"currency": "USD", "balance": "1.25"}]
+        }}}
+        """))
+        precondition(account?.balanceText == "$6.25" && account?.shownBalances.first?.granted == 1.25, "Wallets were not added up")
+        precondition(account?.isAvailable == true, "A funded account read as empty")
+        let empty = try? Service.parseAccountSummary(data("""
+        {"code": 0, "data": {"biz_code": 0, "biz_data": {"normal_wallets": [{"currency": "CNY", "balance": "0"}], "bonus_wallets": []}}}
+        """))
+        precondition(empty?.isAvailable == false && empty?.balanceText == "¥0.00", "An empty account looked funded")
+
+        var rejected = false
+        do { _ = try Service.parseAccountSummary(data("{\"code\": 40003}")) } catch APIError.unauthorized { rejected = true } catch {}
+        precondition(rejected, "A rejected sign-in was not reported as one")
+        precondition((try? Service.parseAccountSummary(data("{\"code\": 0, \"data\": {\"biz_code\": 5}}"))) == nil, "A failure became a balance")
+        precondition((try? Service.parseBalance(data("{\"error\": {}}"))) == nil, "A failure became a balance")
+        let bad = try? Service.parseBalance(data("{\"balance_infos\": [{\"currency\": \"USD\", \"total_balance\": \"nan\"}]}"))
+        precondition(bad?.balanceText == "--", "A malformed amount was shown")
+
+        // A dialog here would hang the run, so this also proves the rows open in place.
+        _ = setupModel.update(available: [])
+        connect(.deepseek)
+        precondition(setupModel.enteringKeyFor == .deepseek, "Add Key did not open DeepSeek's row")
+        connect(.zai)
+        precondition(setupModel.enteringKeyFor == .zai, "Add Key did not move to z.ai's row")
+        connect(.zai)
+        precondition(setupModel.enteringKeyFor == nil, "Add Key did not close z.ai's row")
+        setupModel.enteringKeyFor = .deepseek
+        setupModel.reset()
+        precondition(setupModel.enteringKeyFor == nil, "A row stayed open after setup closed")
+
+        viewModel.useRenderingFixtures([.deepseek])
+        viewModel.showDeepSeek = true
+        viewModel.deepseekUsageData = keyed ?? .placeholder
+        var row = panelCards().first { $0.provider == .deepseek }?.rows.first
+        precondition(row?.amount == "$12.30" && row?.resetText == "$2.00 granted", "The card hid the amount left")
+        viewModel.deepseekUsageData = .placeholder
+        viewModel.deepseekError = "Failed"
+        row = panelCards().first { $0.provider == .deepseek }?.rows.first
+        precondition(row?.amount == "--", "A failed reading read as an empty balance")
+        precondition(panelCards().first { $0.provider == .deepseek }?.actionTitle == "DeepSeek Setup…", "A rejected key had no way to be replaced")
+        viewModel.deepseekError = nil
+        viewModel.deepseekUsageData = empty ?? .placeholder
+        precondition(panelCards().first { $0.provider == .deepseek }?.message == "Balance too low for API calls", "An empty balance went unmentioned")
+
+        viewModel.deepseekUsageData = DeepSeekUsageData(balances: [DeepSeekBalance(currency: "CNY", total: 123_456.78, granted: 0)])
+        let (image, width) = createProviderImage(for: .deepseek)
+        precondition(width > 50 && image.size.width == width, "A large balance was clipped")
+        viewModel.deepseekUsageData = .placeholder
+        viewModel.showDeepSeek = false
     }
 
     private func verifyCursorOutage() {
@@ -275,6 +365,6 @@ struct StatusRenderingTests {
         let model = UsageViewModel(startAutomatically: false)
         let output = ProcessInfo.processInfo.environment["USAGEBAR_RENDER_OUTPUT"].map { URL(fileURLWithPath: $0) }
         try AppDelegate(viewModel: model).verifyRendering(output: output)
-        print("PASS: Cursor outages, plan names, setup status and model, setup/Claude/Codex menus, closed-menu reuse, status image caching, light/dark rendering, Claude without a 5-hour window, focus following")
+        print("PASS: DeepSeek credentials and balances, Cursor outages, plan names, setup status and model, setup/Claude/Codex menus, closed-menu reuse, status image caching, light/dark rendering, Claude without a 5-hour window, focus following")
     }
 }

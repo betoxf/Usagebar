@@ -13,9 +13,11 @@ import SwiftUI
 
 struct UsagePanelRow: Identifiable {
     let label: String
-    let percent: Int
+    var percent = 0
+    /// A prepaid balance, shown in place of a meter.
+    var amount: String?
     let resetText: String
-    var id: String { label }
+    var id: String { label + (amount ?? "") }
 }
 
 struct UsagePanelCard: Identifiable {
@@ -167,15 +169,25 @@ private struct UsagePanelCardView: View {
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                         .frame(width: 38, alignment: .leading)
-                    UsageMeter(percent: row.percent, fill: meterColor)
-                    Text("\(row.percent)%")
-                        .fontWeight(.semibold)
-                        .monospacedDigit()
-                        .frame(width: 40, alignment: .trailing)
-                    Text(row.resetText)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 58, alignment: .trailing)
+                    if let amount = row.amount {
+                        Text(amount)
+                            .fontWeight(.semibold)
+                            .monospacedDigit()
+                        Spacer(minLength: 4)
+                        Text(row.resetText)
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        UsageMeter(percent: row.percent, fill: meterColor)
+                        Text("\(row.percent)%")
+                            .fontWeight(.semibold)
+                            .monospacedDigit()
+                            .frame(width: 40, alignment: .trailing)
+                        Text(row.resetText)
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 58, alignment: .trailing)
+                    }
                 }
             }
 
@@ -262,6 +274,16 @@ struct ProviderMark: View {
             HStack(spacing: 1.7) {
                 templateImage(zcodeMark, height: 10.6)
                 Text("Code").fontWeight(.semibold)
+            }
+        case .deepseek:
+            if NSImage(named: "DeepSeekLogo") != nil {
+                Image("DeepSeekLogo")
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFit()
+                    .frame(height: 18)
+            } else {
+                Text("DeepSeek").fontWeight(.semibold)
             }
         }
     }

@@ -20,6 +20,8 @@ final class CredentialStorage {
         var organizationId: String?
         var claudeOAuth: ClaudeOAuthCredentials?
         var kimiCredential: String?
+        var deepseekAPIKey: String?
+        var zaiAPIKey: String?
     }
 
     nonisolated struct ClaudeOAuthCredentials: Codable, Equatable {
@@ -86,6 +88,28 @@ final class CredentialStorage {
         }
     }
 
+    var deepseekAPIKey: String? {
+        get { cachedCredentials?.deepseekAPIKey }
+        set {
+            if cachedCredentials == nil {
+                cachedCredentials = Credentials()
+            }
+            cachedCredentials?.deepseekAPIKey = newValue
+            removeEmptyCredentialFileOrSave()
+        }
+    }
+
+    var zaiAPIKey: String? {
+        get { cachedCredentials?.zaiAPIKey }
+        set {
+            if cachedCredentials == nil {
+                cachedCredentials = Credentials()
+            }
+            cachedCredentials?.zaiAPIKey = newValue
+            removeEmptyCredentialFileOrSave()
+        }
+    }
+
     func setWebSession(sessionKey: String, organizationId: String) {
         if cachedCredentials == nil { cachedCredentials = Credentials() }
         cachedCredentials?.sessionKey = sessionKey
@@ -95,6 +119,14 @@ final class CredentialStorage {
 
     func setKimiCredential(_ value: String) {
         kimiCredential = value
+    }
+
+    func setDeepSeekAPIKey(_ value: String) {
+        deepseekAPIKey = value
+    }
+
+    func setZaiAPIKey(_ value: String) {
+        zaiAPIKey = value
     }
 
     func clearClaudeCredentials() {
@@ -108,6 +140,18 @@ final class CredentialStorage {
     func clearKimiCredential() {
         guard cachedCredentials != nil else { return }
         cachedCredentials?.kimiCredential = nil
+        removeEmptyCredentialFileOrSave()
+    }
+
+    func clearDeepSeekAPIKey() {
+        guard cachedCredentials != nil else { return }
+        cachedCredentials?.deepseekAPIKey = nil
+        removeEmptyCredentialFileOrSave()
+    }
+
+    func clearZaiAPIKey() {
+        guard cachedCredentials != nil else { return }
+        cachedCredentials?.zaiAPIKey = nil
         removeEmptyCredentialFileOrSave()
     }
 
@@ -125,7 +169,9 @@ final class CredentialStorage {
         let isEmpty = cachedCredentials?.sessionKey == nil &&
             cachedCredentials?.organizationId == nil &&
             cachedCredentials?.claudeOAuth == nil &&
-            cachedCredentials?.kimiCredential == nil
+            cachedCredentials?.kimiCredential == nil &&
+            cachedCredentials?.deepseekAPIKey == nil &&
+            cachedCredentials?.zaiAPIKey == nil
         if isEmpty {
             cachedCredentials = nil
             try? FileManager.default.removeItem(at: credentialsFileURL)

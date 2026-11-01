@@ -49,6 +49,7 @@ nonisolated enum TerminalAgentDetector {
             case "cursor-agent": return .cursor
             case "kimi", "kimi-cli", "kimi-code": return .kimi
             case "grok": return .cursor
+            case "dsh", "deepseek", "deepseek-tui": return .deepseek
             default: break
             }
             // Versioned installs and package entry points do not carry the tool's name.
@@ -68,6 +69,7 @@ nonisolated enum TerminalAgentDetector {
         if isWithin("anthropic.com") { return .claude }
         if isWithin("z.ai") || isWithin("bigmodel.cn") { return .zai }
         if isWithin("kimi.com") { return .kimi }
+        if isWithin("deepseek.com") { return .deepseek }
         return nil
     }
 

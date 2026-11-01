@@ -67,6 +67,10 @@ nonisolated func isRequestCancelled(_ error: Error) -> Bool {
     func setKimiCredential(_ value: String) {}
     func clearClaudeCredentials() {}
     func clearKimiCredential() {}
+    func setDeepSeekAPIKey(_ value: String) {}
+    func clearDeepSeekAPIKey() {}
+    func setZaiAPIKey(_ value: String) {}
+    func clearZaiAPIKey() {}
 }
 
 @ProviderActor final class ClaudeAPIService {
@@ -109,6 +113,7 @@ nonisolated struct ZaiUsageData { var testValue = 0; static let placeholder = Za
 @ProviderActor final class ZaiAPIService {
     static let shared = ZaiAPIService()
     var hasCredentials: Bool { FakeProviders.probe(.zai) }
+    var hasSavedKey: Bool { false }
     func clearCache() {}
     func fetchUsage() async throws -> ZaiUsageData {
         let value = try await FakeProviders.fetch(.zai)
@@ -128,5 +133,17 @@ nonisolated struct KimiUsageData { var testValue = 0; static let placeholder = K
     func fetchUsage() async throws -> KimiUsageData {
         let value = try await FakeProviders.fetch(.kimi)
         return KimiUsageData(testValue: value)
+    }
+}
+
+nonisolated struct DeepSeekUsageData { var testValue = 0; static let placeholder = DeepSeekUsageData() }
+
+@ProviderActor final class DeepSeekAPIService {
+    static let shared = DeepSeekAPIService()
+    var hasCredentials: Bool { FakeProviders.probe(.deepseek) }
+    var hasSavedKey: Bool { false }
+    func fetchUsage() async throws -> DeepSeekUsageData {
+        let value = try await FakeProviders.fetch(.deepseek)
+        return DeepSeekUsageData(testValue: value)
     }
 }

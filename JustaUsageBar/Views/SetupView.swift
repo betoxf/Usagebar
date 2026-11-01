@@ -20,11 +20,14 @@ final class SetupModel: ObservableObject {
     /// Providers someone just started connecting, and when.
     @Published private(set) var connecting: [DisplayProvider: Date] = [:]
     @Published var isSigningInToClaude = false
+    /// The row that is open to take a pasted API key.
+    @Published var enteringKeyFor: DisplayProvider?
 
     var cursorMarks: NSImage?
     var zcodeMark: NSImage?
 
     var onConnect: (DisplayProvider) -> Void = { _ in }
+    var onSaveKey: (DisplayProvider, String) -> Void = { _, _ in }
     var onClose: () -> Void = {}
 
     func startConnecting(_ provider: DisplayProvider) {
@@ -50,6 +53,7 @@ final class SetupModel: ObservableObject {
     func reset() {
         connecting = [:]
         isSigningInToClaude = false
+        enteringKeyFor = nil
     }
 }
 
@@ -120,31 +124,44 @@ private struct SetupRow: View {
     let signIn: ProviderSignIn?
     @ObservedObject var model: SetupModel
 
+    /// Where to get a key, while this row is open to take one. A connected row
+    /// opens too, so a rejected key can be replaced.
+    private var keyPage: URL? {
+        guard model.enteringKeyFor == provider,
+              case .apiKey(let page) = ProviderSignIn.available(for: provider) else { return nil }
+        return page
+    }
+
     var body: some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 4) {
-                ProviderMark(provider: provider, cursorMarks: model.cursorMarks, zcodeMark: model.zcodeMark)
-                    .frame(height: 18)
-                Text(detail)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 4) {
+                    ProviderMark(provider: provider, cursorMarks: model.cursorMarks, zcodeMark: model.zcodeMark)
+                        .frame(height: 18)
+                    Text(detail)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(name). \(detail)")
+                Spacer(minLength: 8)
+                if isConnected {
+                    HStack(spacing: 4) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                            .accessibilityHidden(true)
+                        Text("Connected")
+                    }
+                } else if let signIn {
+                    if isConnecting {
+                        ProgressView().controlSize(.small)
+                    }
+                    Button(signIn.buttonTitle) { model.onConnect(provider) }
+                        .accessibilityLabel("\(signIn.buttonTitle), \(name)")
+                }
             }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(name). \(detail)")
-            Spacer(minLength: 8)
-            if isConnected {
-                HStack(spacing: 4) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                        .accessibilityHidden(true)
-                    Text("Connected")
-                }
-            } else if let signIn {
-                if isConnecting {
-                    ProgressView().controlSize(.small)
-                }
-                Button(signIn.buttonTitle) { model.onConnect(provider) }
-                    .accessibilityLabel("\(signIn.buttonTitle), \(name)")
+            if let keyPage {
+                APIKeyEntry(provider: provider, name: name, keyPage: keyPage, model: model)
             }
         }
         .padding(EdgeInsets(top: 9, leading: 12, bottom: 10, trailing: 12))
@@ -160,6 +177,7 @@ private struct SetupRow: View {
         case .cursor: "Cursor"
         case .kimi: "Kimi Code"
         case .zai: "z.ai"
+        case .deepseek: "DeepSeek"
         }
     }
 
@@ -173,6 +191,7 @@ private struct SetupRow: View {
         case .cursor: "Cursor and Grok Bot"
         case .kimi: "Kimi Code CLI or API key"
         case .zai: "z.ai coding plan"
+        case .deepseek: "DeepSeek Harness or API key"
         }
     }
 
@@ -180,8 +199,58 @@ private struct SetupRow: View {
         switch signIn {
         case .terminal: "Finish signing in, then come back here."
         case .download: "Install it, then come back here."
-        case .zaiKey: "Save your key, then come back here."
         default: nil
         }
+    }
+}
+
+/// What a row opens into to take an API key. The key stays in this view until
+/// it is saved, so closing the row forgets it.
+private struct APIKeyEntry: View {
+    let provider: DisplayProvider
+    let name: String
+    let keyPage: URL
+    @ObservedObject var model: SetupModel
+    @State private var key = ""
+    @FocusState private var isFieldFocused: Bool
+
+    private var trimmedKey: String {
+        key.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                SecureField("API key", text: $key)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($isFieldFocused)
+                    .onSubmit(save)
+                    .accessibilityLabel("\(name) API key")
+                Button("Paste") {
+                    if let text = NSPasteboard.general.string(forType: .string) { key = text }
+                }
+                .accessibilityLabel("Paste \(name) API key")
+            }
+            HStack(spacing: 8) {
+                Text("Encrypted on this Mac.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                Link("Get a key", destination: keyPage)
+                    .font(.system(size: 11))
+                Spacer(minLength: 0)
+                Button("Save", action: save)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(trimmedKey.isEmpty)
+                    .accessibilityLabel("Save \(name) API key")
+            }
+        }
+        // Focus set during onAppear is lost, because the field isn't in the window yet.
+        .onAppear { DispatchQueue.main.async { isFieldFocused = true } }
+    }
+
+    private func save() {
+        guard !trimmedKey.isEmpty else { return }
+        model.onSaveKey(provider, trimmedKey)
+        model.enteringKeyFor = nil
     }
 }

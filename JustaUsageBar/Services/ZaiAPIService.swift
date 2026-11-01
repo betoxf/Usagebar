@@ -64,8 +64,12 @@ final class ZaiAPIService {
         apiKey() != nil
     }
 
-    /// Resolves the API key from the environment first, then a small set of
-    /// known local config files. Returns nil when Z.ai isn't configured.
+    var hasSavedKey: Bool {
+        CredentialStorage.shared.zaiAPIKey != nil
+    }
+
+    /// Resolves a key saved in Usagebar first, then the environment, then a small
+    /// set of known local config files. Returns nil when Z.ai isn't configured.
     private func apiKey() -> String? {
         // A key that was found stays until Refresh or until z.ai rejects it, so
         // the keychain is not read again every few minutes. A missing one is
@@ -82,6 +86,9 @@ final class ZaiAPIService {
     }
 
     private func resolveKey() -> String? {
+        if let saved = CredentialStorage.shared.zaiAPIKey {
+            return saved
+        }
         let env = ProcessInfo.processInfo.environment
         for name in ["Z_AI_API_KEY", "ZAI_API_KEY", "ZHIPU_API_KEY"] {
             if let value = env[name]?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty {

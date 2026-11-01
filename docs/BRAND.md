@@ -22,6 +22,6 @@ The symbol represents a compact usage window with a local loading indicator. It 
 
 ## Provider marks
 
-Provider logos appear only to identify a provider's usage and its setup row. Keep each one in its owner's form. The Kimi Code logo in `KimiCodeLogo.imageset` comes from kimi.com/code, and only its wordmark turns white in dark mode.
+Provider logos appear only to identify a provider's usage and its setup row. Keep each one in its owner's form. The Kimi Code logo in `KimiCodeLogo.imageset` comes from kimi.com/code, and only its wordmark turns white in dark mode. The DeepSeek logo in `DeepSeekLogo.imageset` is `images/logo.svg` from the deepseek-ai/DeepSeek-LLM repository, and likewise only its wordmark turns white in dark mode.
 
 Usagebar is not affiliated with, endorsed by, or sponsored by any of these providers. See the [README](../README.md#not-affiliated-with-any-provider).

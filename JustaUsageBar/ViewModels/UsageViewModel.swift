@@ -39,6 +39,11 @@ final class UsageViewModel: ObservableObject {
     @Published var kimiAuthSource: KimiAuthSource = .none
     @Published var kimiError: String?
 
+    // MARK: - DeepSeek Published Properties
+
+    @Published var deepseekUsageData: DeepSeekUsageData = .placeholder
+    @Published var deepseekError: String?
+
     // MARK: - General
 
     @Published var isLoading: Bool = false
@@ -56,6 +61,7 @@ final class UsageViewModel: ObservableObject {
     @AppStorage("showCursor") var showCursor: Bool = true
     @AppStorage("showZai") var showZai: Bool = true
     @AppStorage("showKimi") var showKimi: Bool = true
+    @AppStorage("showDeepSeek") var showDeepSeek: Bool = true
     @AppStorage("animationInterval") var animationInterval: Double = 8.0
     @AppStorage("followActiveApp") var followActiveApp: Bool = true
     @AppStorage("autoUpdate") var autoUpdate: Bool = true
@@ -87,6 +93,8 @@ final class UsageViewModel: ObservableObject {
 
     @Published private(set) var availableProviders: Set<DisplayProvider> = []
     @Published private(set) var hasSavedKimiCredential = false
+    @Published private(set) var hasSavedDeepSeekKey = false
+    @Published private(set) var hasSavedZaiKey = false
     @Published private(set) var refreshStates: [DisplayProvider: ProviderRefreshState] = [:]
     @Published private(set) var isBackgroundSuspended = false
 
@@ -144,6 +152,7 @@ final class UsageViewModel: ObservableObject {
             case .cursor: return showCursor
             case .kimi: return showKimi
             case .zai: return showZai
+            case .deepseek: return showDeepSeek
             }
         })
     }
@@ -161,6 +170,7 @@ final class UsageViewModel: ObservableObject {
     var hasCursorCredentials: Bool { availableProviders.contains(.cursor) }
     var hasZaiCredentials: Bool { availableProviders.contains(.zai) }
     var hasKimiCredentials: Bool { availableProviders.contains(.kimi) }
+    var hasDeepSeekCredentials: Bool { availableProviders.contains(.deepseek) }
 
     var shouldAnimateProviders: Bool {
         !isBackgroundSuspended && !lowPowerMode &&
@@ -262,8 +272,11 @@ final class UsageViewModel: ObservableObject {
         async let zai = ZaiAPIService.shared.hasCredentials
         async let kimi = KimiAPIService.shared.detectedAuthSource
         async let savedKimi = KimiAPIService.shared.hasSavedCredential
-        let (hasClaude, hasWeb, hasCodex, hasCursor, hasZai, kimiSource, saved) =
-            await (claude, web, codex, cursor, zai, kimi, savedKimi)
+        async let deepseek = DeepSeekAPIService.shared.hasCredentials
+        async let savedDeepSeek = DeepSeekAPIService.shared.hasSavedKey
+        async let savedZai = ZaiAPIService.shared.hasSavedKey
+        let (hasClaude, hasWeb, hasCodex, hasCursor, hasZai, kimiSource, saved, hasDeepSeek, savedKey, savedZaiKey) =
+            await (claude, web, codex, cursor, zai, kimi, savedKimi, deepseek, savedDeepSeek, savedZai)
         guard !Task.isCancelled else { return }
         var available: Set<DisplayProvider> = []
         if hasClaude || hasWeb { available.insert(.claude) }
@@ -271,8 +284,11 @@ final class UsageViewModel: ObservableObject {
         if hasCursor { available.insert(.cursor) }
         if hasZai { available.insert(.zai) }
         if kimiSource != .none { available.insert(.kimi) }
+        if hasDeepSeek { available.insert(.deepseek) }
         if available != availableProviders { availableProviders = available }
         if saved != hasSavedKimiCredential { hasSavedKimiCredential = saved }
+        if savedKey != hasSavedDeepSeekKey { hasSavedDeepSeekKey = savedKey }
+        if savedZaiKey != hasSavedZaiKey { hasSavedZaiKey = savedZaiKey }
         claudeAuthSource = hasClaude ? .oauth : (hasWeb ? .webSession : .none)
         kimiAuthSource = kimiSource
         knownTargets = refreshTargets
@@ -296,6 +312,7 @@ final class UsageViewModel: ObservableObject {
             case .cursor: await CursorAPIService.shared.clearCache()
             case .kimi: await KimiAPIService.shared.clearCache()
             case .zai: await ZaiAPIService.shared.clearCache()
+            case .deepseek: break // Reads its files every time.
             }
         }
         await detectCredentials(forceReload: false)
@@ -357,6 +374,10 @@ final class UsageViewModel: ObservableObject {
                 try Task.checkCancellation()
                 kimiUsageData = data
                 kimiAuthSource = source
+            case .deepseek:
+                let data = try await DeepSeekAPIService.shared.fetchUsage()
+                try Task.checkCancellation()
+                deepseekUsageData = data
             }
             setError(nil, for: provider)
             refreshStates[provider, default: .init()].succeeded(at: Date())
@@ -372,6 +393,10 @@ final class UsageViewModel: ObservableObject {
             )
             if provider == .claude, case APIError.unauthorized = error {
                 setError("Signed out — run `claude` in Terminal to log in", for: provider)
+            } else if provider == .deepseek, case APIError.unauthorized = error {
+                setError("DeepSeek rejected this key or sign-in", for: provider)
+            } else if provider == .zai, case APIError.unauthorized = error {
+                setError("z.ai rejected this key", for: provider)
             } else {
                 setError((error as? APIError)?.errorDescription ??
                          (error as? KimiServiceError)?.errorDescription ?? error.localizedDescription, for: provider)
@@ -386,6 +411,7 @@ final class UsageViewModel: ObservableObject {
         case .cursor: cursorError = message
         case .zai: zaiError = message
         case .kimi: kimiError = message
+        case .deepseek: deepseekError = message
         }
     }
 
@@ -549,6 +575,49 @@ final class UsageViewModel: ObservableObject {
             self.kimiUsageData = .placeholder
             self.kimiError = nil
             self.refreshStates[.kimi] = nil
+        })
+    }
+
+    /// A new key starts clean, so it neither shows the old account's reading nor
+    /// waits out the old key's cooldown.
+    func saveDeepSeekAPIKey(_ key: String) {
+        changeCredentials({
+            CredentialStorage.shared.setDeepSeekAPIKey(key.trimmingCharacters(in: .whitespacesAndNewlines))
+        }, reset: {
+            self.deepseekUsageData = .placeholder
+            self.deepseekError = nil
+            self.refreshStates[.deepseek] = nil
+        })
+    }
+
+    func clearDeepSeekAPIKey() {
+        changeCredentials({
+            CredentialStorage.shared.clearDeepSeekAPIKey()
+        }, reset: {
+            self.deepseekUsageData = .placeholder
+            self.deepseekError = nil
+            self.refreshStates[.deepseek] = nil
+        })
+    }
+
+    func saveZaiAPIKey(_ key: String) {
+        changeCredentials({
+            CredentialStorage.shared.setZaiAPIKey(key.trimmingCharacters(in: .whitespacesAndNewlines))
+        }, reset: {
+            self.zaiUsageData = .placeholder
+            self.zaiError = nil
+            self.refreshStates[.zai] = nil
+        })
+    }
+
+    func clearZaiAPIKey() {
+        changeCredentials({
+            CredentialStorage.shared.clearZaiAPIKey()
+            ZaiAPIService.shared.clearCache()
+        }, reset: {
+            self.zaiUsageData = .placeholder
+            self.zaiError = nil
+            self.refreshStates[.zai] = nil
         })
     }
 

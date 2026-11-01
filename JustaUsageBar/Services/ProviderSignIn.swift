@@ -16,8 +16,8 @@ nonisolated enum ProviderSignIn: Equatable {
     case claudeWebsite
     /// Kimi Code accepts a pasted API key or web token.
     case kimiKey
-    /// z.ai has no sign-in, only an API key saved in its config file.
-    case zaiKey
+    /// z.ai and DeepSeek take a pasted API key, which `page` hands out.
+    case apiKey(page: URL)
     /// There is nothing to sign in with yet, so the download page comes first.
     case download(title: String, url: URL)
 
@@ -35,14 +35,16 @@ nonisolated enum ProviderSignIn: Equatable {
         case .kimi:
             return login("kimi", alsoIn: [".kimi-code/bin"]) ?? .kimiKey
         case .zai:
-            return .zaiKey
+            return .apiKey(page: URL(string: "https://z.ai/manage-apikey/apikey-list")!)
+        case .deepseek:
+            return .apiKey(page: URL(string: "https://platform.deepseek.com/api_keys")!)
         }
     }
 
     var buttonTitle: String {
         switch self {
         case .terminal, .claudeWebsite: "Sign In"
-        case .kimiKey, .zaiKey: "Add Key"
+        case .kimiKey, .apiKey: "Add Key"
         case .download(let title, _): title
         }
     }

@@ -237,6 +237,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         if bundleId == "dev.zcode.app" || name == "zcode" {
             return .zai
         }
+        if bundleId.hasPrefix("com.deepseek.") || name.hasPrefix("deepseek") {
+            return .deepseek
+        }
         // Grok runs on the Cursor plan, whose marks include it.
         if bundleId.contains("xai") || bundleId.contains("x.ai") || name == "grok" || name.contains("grok") {
             return .cursor
@@ -407,8 +410,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         let hasCursor = viewModel.hasCursorCredentials
         let hasZai = viewModel.hasZaiCredentials
         let hasKimi = viewModel.hasKimiCredentials
+        let hasDeepSeek = viewModel.hasDeepSeekCredentials
 
-        if !hasClaude && !hasCodex && !hasCursor && !hasZai && !hasKimi {
+        if !hasClaude && !hasCodex && !hasCursor && !hasZai && !hasKimi && !hasDeepSeek {
             let setupItem = NSMenuItem(title: "Set Up Usagebar…", action: #selector(showSetupWindow), keyEquivalent: "")
             setupItem.target = self
             menu.addItem(setupItem)
@@ -426,6 +430,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 case .cursor: "Cursor"
                 case .kimi: "Kimi Code"
                 case .zai: "z.ai"
+                case .deepseek: "DeepSeek"
                 }
                 let item = NSMenuItem(title: "\(title): \(viewModel.freshnessText(for: provider))", action: nil, keyEquivalent: "")
                 item.isEnabled = false
@@ -454,7 +459,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             displayMenu.addItem(onlyWeeklyItem)
 
             // Provider toggles
-            let authedProviderCount = [hasClaude, hasCodex, hasCursor, hasKimi, hasZai].filter { $0 }.count
+            let authedProviderCount = [hasClaude, hasCodex, hasCursor, hasKimi, hasZai, hasDeepSeek].filter { $0 }.count
             if authedProviderCount > 0 {
                 displayMenu.addItem(NSMenuItem.separator())
 
@@ -493,6 +498,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                     displayMenu.addItem(zaiToggle)
                 }
 
+                if hasDeepSeek {
+                    let deepseekToggle = NSMenuItem(title: "Show DeepSeek", action: #selector(toggleShowDeepSeek), keyEquivalent: "")
+                    deepseekToggle.target = self
+                    deepseekToggle.state = viewModel.showDeepSeek ? .on : .off
+                    displayMenu.addItem(deepseekToggle)
+                }
+
                 // Follow-active-app + switch-interval apply once 2+ providers show.
                 if authedProviderCount >= 2 {
                     displayMenu.addItem(NSMenuItem.separator())
@@ -500,7 +512,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                     let followItem = NSMenuItem(title: "Follow Active App", action: #selector(toggleFollowActiveApp), keyEquivalent: "")
                     followItem.target = self
                     followItem.state = viewModel.followActiveApp ? .on : .off
-                    followItem.toolTip = "Show the provider of the AI app or terminal CLI you used last (Claude, ChatGPT/Codex, Cursor or Grok Bot, Kimi Code, or ZCode)"
+                    followItem.toolTip = "Show the provider of the AI app or terminal CLI you used last (Claude, ChatGPT/Codex, Cursor or Grok Bot, Kimi Code, ZCode, or DeepSeek Harness)"
                     displayMenu.addItem(followItem)
 
                     let intervalMenu = NSMenu()
@@ -564,6 +576,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 let forgetKimi = NSMenuItem(title: "Forget Saved Kimi Code Credential", action: #selector(clearKimiCredential), keyEquivalent: "")
                 forgetKimi.target = self
                 menu.addItem(forgetKimi)
+            }
+
+            if viewModel.hasSavedZaiKey {
+                let forgetZai = NSMenuItem(title: "Forget Saved z.ai Key", action: #selector(clearZaiAPIKey), keyEquivalent: "")
+                forgetZai.target = self
+                menu.addItem(forgetZai)
+            }
+
+            if viewModel.hasSavedDeepSeekKey {
+                let forgetDeepSeek = NSMenuItem(title: "Forget Saved DeepSeek Key", action: #selector(clearDeepSeekAPIKey), keyEquivalent: "")
+                forgetDeepSeek.target = self
+                menu.addItem(forgetDeepSeek)
             }
 
             if viewModel.availableProviders.count < DisplayProvider.allCases.count {
@@ -741,11 +765,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
         if viewModel.hasZaiCredentials && viewModel.showZai {
             let zai = viewModel.zaiUsageData
+            let error = viewModel.zaiError
             cards.append(UsagePanelCard(
                 provider: .zai,
                 detail: zai.planName != "unknown" ? displayPlanName(zai.planName) : "",
                 rows: [UsagePanelRow(label: zai.windowLabel, percent: zai.usedPercent, resetText: zai.timeUntilReset)],
-                message: viewModel.zaiError
+                message: error,
+                actionTitle: error != nil ? "z.ai Setup…" : nil
+            ))
+        }
+
+        if viewModel.hasDeepSeekCredentials && viewModel.showDeepSeek {
+            let deepseek = viewModel.deepseekUsageData
+            var rows = deepseek.shownBalances.map {
+                UsagePanelRow(label: "Left", amount: $0.totalText, resetText: $0.granted > 0 ? "\($0.grantedText) granted" : "")
+            }
+            if rows.isEmpty {
+                rows = [UsagePanelRow(label: "Left", amount: deepseek.balanceText, resetText: "")]
+            }
+            let error = viewModel.deepseekError
+            cards.append(UsagePanelCard(
+                provider: .deepseek, detail: "Credits", rows: rows,
+                message: error ?? (deepseek.isAvailable ? nil : "Balance too low for API calls"),
+                actionTitle: error != nil ? "DeepSeek Setup…" : nil
             ))
         }
 
@@ -773,7 +815,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             case .claude: self.authenticateClaude()
             case .codex: self.authenticateCodex()
             case .kimi: self.authenticateKimi()
-            case .cursor, .zai: break
+            case .zai, .deepseek:
+                self.showSetupWindow()
+                self.setupModel.enteringKeyFor = provider
+            case .cursor: break
             }
         }
         panelModel.onRefresh = { [weak self] in
@@ -837,6 +882,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             setupModel.cursorMarks = panelModel.cursorMarks
             setupModel.zcodeMark = panelModel.zcodeMark
             setupModel.onConnect = { [weak self] in self?.connect($0) }
+            setupModel.onSaveKey = { [weak self] provider, key in
+                if provider == .zai {
+                    self?.viewModel.saveZaiAPIKey(key)
+                } else {
+                    self?.viewModel.saveDeepSeekAPIKey(key)
+                }
+                self?.rebuildMenu()
+            }
             setupModel.onClose = { [weak self] in self?.setupWindow?.close() }
             _ = setupModel.update(available: viewModel.availableProviders)
 
@@ -900,10 +953,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             setupModel.isSigningInToClaude = true
         case .kimiKey:
             authenticateKimi()
-        case .zaiKey:
-            if authenticateZai() {
-                setupModel.startConnecting(provider)
-            }
+        case .apiKey:
+            setupModel.enteringKeyFor = setupModel.enteringKeyFor == provider ? nil : provider
         case .download(_, let url):
             NSWorkspace.shared.open(url)
             setupModel.startConnecting(provider)
@@ -977,27 +1028,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         }
     }
 
-    /// z.ai has no sign-in, so the key goes where Usagebar already looks for it.
-    /// Returns whether the key page was opened.
-    private func authenticateZai() -> Bool {
-        let alert = NSAlert()
-        alert.messageText = "Connect z.ai"
-        alert.informativeText = """
-        Create an API key on z.ai, then save it in `~/.zai/config.json` like this:
-
-        {"apiKey": "your-key"}
-        """
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: "Open z.ai API Keys")
-        alert.addButton(withTitle: "Cancel")
-        NSApp.activate(ignoringOtherApps: true)
-
-        guard alert.runModal() == .alertFirstButtonReturn,
-              let url = URL(string: "https://z.ai/manage-apikey/apikey-list") else { return false }
-        NSWorkspace.shared.open(url)
-        return true
-    }
-
     private func showKimiCredentialPrompt() {
         let alert = NSAlert()
         alert.messageText = "Kimi Code Credential"
@@ -1058,7 +1088,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             (viewModel.showCodex && viewModel.hasCodexCredentials) ||
             (viewModel.showCursor && viewModel.hasCursorCredentials) ||
             (viewModel.showKimi && viewModel.hasKimiCredentials) ||
-            (viewModel.showZai && viewModel.hasZaiCredentials)
+            (viewModel.showZai && viewModel.hasZaiCredentials) ||
+            (viewModel.showDeepSeek && viewModel.hasDeepSeekCredentials)
         if !anyShown {
             viewModel[keyPath: keyPath] = true
         }
@@ -1091,6 +1122,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     @objc private func toggleShowZai() {
         viewModel.showZai.toggle()
         ensureAProviderRemainsShown(fallback: \.showZai)
+        NotificationCenter.default.post(name: NSNotification.Name("SettingsChanged"), object: nil)
+    }
+
+    @objc private func toggleShowDeepSeek() {
+        viewModel.showDeepSeek.toggle()
+        ensureAProviderRemainsShown(fallback: \.showDeepSeek)
         NotificationCenter.default.post(name: NSNotification.Name("SettingsChanged"), object: nil)
     }
 
@@ -1139,6 +1176,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     @objc private func clearKimiCredential() {
         viewModel.clearKimiCredential()
+        if !viewModel.hasCredentials {
+            stopProviderAnimation()
+            showSetupStatus()
+        } else {
+            syncCurrentProvider(persistPreference: true)
+            updateStatusImage()
+        }
+        rebuildMenu()
+    }
+
+    @objc private func clearZaiAPIKey() {
+        viewModel.clearZaiAPIKey()
+        if !viewModel.hasCredentials {
+            stopProviderAnimation()
+            showSetupStatus()
+        } else {
+            syncCurrentProvider(persistPreference: true)
+            updateStatusImage()
+        }
+        rebuildMenu()
+    }
+
+    @objc private func clearDeepSeekAPIKey() {
+        viewModel.clearDeepSeekAPIKey()
         if !viewModel.hasCredentials {
             stopProviderAnimation()
             showSetupStatus()
@@ -1662,6 +1723,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             return viewModel.hasKimiCredentials
         case .zai:
             return viewModel.hasZaiCredentials
+        case .deepseek:
+            return viewModel.hasDeepSeekCredentials
         }
     }
 
@@ -1677,6 +1740,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             return viewModel.showKimi
         case .zai:
             return viewModel.showZai
+        case .deepseek:
+            return viewModel.showDeepSeek
         }
     }
 
@@ -1843,6 +1908,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             primary = viewModel.zaiUsageData.usedPercent
             secondary = nil
             label = viewModel.zaiUsageData.windowLabel
+        case .deepseek:
+            // The amount is the label; availability picks its color.
+            primary = viewModel.deepseekUsageData.isAvailable ? 1 : 0
+            secondary = nil
+            label = viewModel.deepseekUsageData.balanceText
         }
         return StatusRenderKey(
             provider: currentProvider, primary: primary, secondary: secondary, windowLabel: label,
@@ -1876,6 +1946,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 glyph: .zai,
                 windowLabel: viewModel.zaiUsageData.windowLabel
             )
+        case .deepseek:
+            return createDeepSeekImage()
         }
     }
 
@@ -2242,6 +2314,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         return (image, width)
     }
 
+    // MARK: - DeepSeek Image
+
+    /// The logo over the amount left. DeepSeek is prepaid, so there is no limit
+    /// to show a percentage of, and the width follows the amount.
+    private func createDeepSeekImage() -> (NSImage, CGFloat) {
+        let showIcon = viewModel.showIcon
+        let deepseek = viewModel.deepseekUsageData
+        let textColor = getDarkMode() ? NSColor.white : NSColor(white: 0.25, alpha: 1.0)
+        let value = NSAttributedString(string: deepseek.balanceText, attributes: [
+            .font: NSFont.systemFont(ofSize: 10, weight: .regular),
+            .foregroundColor: deepseek.isAvailable ? textColor : brandDeepSeekColor
+        ])
+        let width = max(50, ceil(value.size().width) + 8)
+        let height: CGFloat = showIcon ? 22 : 16
+
+        let image = NSImage(size: NSSize(width: width, height: height))
+        image.lockFocus()
+
+        if showIcon, let logo = NSImage(named: "DeepSeekLogo"), logo.size.height > 0 {
+            let logoWidth = 9.5 * logo.size.width / logo.size.height
+            // The wordmark turns white in dark mode, which only the bar's own appearance can tell.
+            (statusItem.button?.effectiveAppearance ?? NSApp.effectiveAppearance).performAsCurrentDrawingAppearance {
+                logo.draw(in: NSRect(x: (width - logoWidth) / 2, y: 11.75, width: logoWidth, height: 9.5))
+            }
+        }
+        value.draw(at: NSPoint(x: (width - value.size().width) / 2, y: showIcon ? 0 : 3))
+
+        if availableUpdateVersion != nil {
+            brandClaudeColor.setFill()
+            NSBezierPath(ovalIn: NSRect(x: width - 5, y: height - 5, width: 4, height: 4)).fill()
+        }
+
+        image.unlockFocus()
+        image.isTemplate = false
+        return (image, width)
+    }
+
     private func usageValueString(_ percentage: Int, color: NSColor) -> NSAttributedString {
         let value = NSMutableAttributedString(string: "\(percentage)", attributes: [
             .font: NSFont.systemFont(ofSize: 10, weight: .regular),
@@ -2492,6 +2601,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     private var brandZaiColor: NSColor {
         NSColor(red: 0.91, green: 0.35, blue: 0.42, alpha: 1.0)
+    }
+
+    // The blue of DeepSeek's logo, #4D6BFE.
+    private var brandDeepSeekColor: NSColor {
+        NSColor(red: 0.302, green: 0.42, blue: 0.996, alpha: 1.0)
     }
 
     private func usageHighlightColor(

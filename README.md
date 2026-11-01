@@ -1,7 +1,7 @@
 <div align="center">
   <img src="assets/brand/usagebar-logo.png" alt="Usagebar" width="760">
 
-  <p><strong>Claude Code, Codex, Cursor, Kimi Code, and z.ai usage limits, directly in your macOS menu bar.</strong></p>
+  <p><strong>Claude Code, Codex, Cursor, Kimi Code, and z.ai usage limits, plus your DeepSeek balance, directly in your macOS menu bar.</strong></p>
   <p>A free, private, native Mac app that shows your 5-hour window, weekly cap, and when each one resets, without opening a browser.</p>
 
   <p>
@@ -131,7 +131,8 @@ The setup window runs these for you. You can also run them yourself, then click 
 | Codex | `codex login` | **Get Codex** opens the download page. |
 | Cursor | `cursor-agent login` | **Get Cursor CLI** opens the download page. Recent Cursor apps encrypt their sign-in, so Usagebar reads the CLI's. |
 | Kimi Code | `kimi login` | **Add Key** saves a Kimi Code API key or `kimi-auth` web token. |
-| z.ai | None | **Add Key** saves your API key. Usagebar also reads `Z_AI_API_KEY` or `~/.zai/config.json` with `{"apiKey": "..."}`. |
+| z.ai | None | **Add Key** saves your API key, encrypted on this Mac. Usagebar also reads `Z_AI_API_KEY` or `~/.zai/config.json` with `{"apiKey": "..."}`. |
+| DeepSeek | None | Sign in to DeepSeek Harness, and Usagebar finds it on its own. Otherwise **Add Key** saves a DeepSeek API key, encrypted on this Mac. Usagebar also reads `DEEPSEEK_API_KEY` or `api_key` in `~/.deepseek/config.toml`. |
 
 ### If Claude shows "Session expired" or authentication fails
 
@@ -210,11 +211,12 @@ Usage limits matter most while you are working. Usagebar keeps your Claude Code,
 
 | Capability | What it gives you |
 | --- | --- |
-| Multiple providers | Track Claude, Codex, Kimi Code, Cursor, and z.ai from one status item. |
+| Multiple providers | Track Claude, Codex, Kimi Code, Cursor, z.ai, and DeepSeek from one status item. |
+| Prepaid balance | See the DeepSeek credits you have left, for an API key or a DeepSeek Harness sign-in. |
 | At-a-glance limits | See rolling-window and weekly percentages without opening a browser. |
-| Focus-aware switching | Show the provider of the AI tool you used last: the Claude, ChatGPT/Codex, Cursor or Grok Bot, Kimi Code, or ZCode app, or the Claude Code, Codex, Cursor, or Kimi CLI running in your terminal. |
+| Focus-aware switching | Show the provider of the AI tool you used last: the Claude, ChatGPT/Codex, Cursor or Grok Bot, Kimi Code, ZCode, or DeepSeek Harness app, or the Claude Code, Codex, Cursor, Kimi, or DeepSeek Harness CLI running in your terminal. |
 | Usage panel | One card per provider with its plan, a meter per limit, and the time until it resets. Click a card to show that provider in the menu bar. |
-| Local credential discovery | Reuse the Claude Code, Codex, Cursor, Kimi Code, and z.ai sign-ins already on the Mac. No API keys to paste. |
+| Local credential discovery | Reuse the Claude Code, Codex, Cursor, Kimi Code, z.ai, and DeepSeek sign-ins already on the Mac. No API keys to paste. |
 | Privacy-first operation | No Usagebar account, telemetry, analytics, or intermediary backend. |
 | Lightweight runtime | A native Swift menu-bar app with no web runtime or bundled service. |
 

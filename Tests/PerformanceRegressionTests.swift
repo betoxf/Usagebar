@@ -14,6 +14,7 @@ struct PerformanceRegressionTests {
         testRetryAfter()
         testTimerLifetime()
         try await testViewModel()
+        try await testRejectedKeys()
         testTerminalCommands()
         try await testTerminalSessionScan()
         await testProviderHTTP()
@@ -187,6 +188,21 @@ struct PerformanceRegressionTests {
         check(model.refreshTargets == [.claude], "All-hidden fallback disappeared")
     }
 
+    @MainActor static func testRejectedKeys() async throws {
+        await FakeProviders.reset()
+        await FakeProviders.setAvailable([.deepseek, .zai])
+        await FakeProviders.setError(.unauthorized, for: .deepseek)
+        await FakeProviders.setError(.unauthorized, for: .zai)
+        let model = UsageViewModel(startAutomatically: false)
+        defer { model.stopAutoRefresh() }
+        model.showDeepSeek = true
+        model.showZai = true
+        await model.refresh()
+        check(model.deepseekError == "DeepSeek rejected this key or sign-in", "A rejected DeepSeek key read as an expired session")
+        check(model.zaiError == "z.ai rejected this key", "A rejected z.ai key read as an expired session")
+        await FakeProviders.setAvailable([.claude, .codex, .kimi])
+    }
+
     static func testTerminalCommands() {
         let zai = "https://api.z.ai/api/anthropic"
         let cases: [(executable: String, arguments: [String], baseURL: String?, expected: DisplayProvider?)] = [
@@ -194,6 +210,9 @@ struct PerformanceRegressionTests {
             ("/Users/a/.local/share/claude/versions/2.1.286", ["claude"], "https://api.anthropic.com", .claude),
             ("/Users/a/.cc-mirror/zai/native/claude", ["/Users/a/.cc-mirror/zai/native/claude"], zai, .zai),
             ("/opt/homebrew/bin/node", ["node", "/opt/homebrew/bin/claude"], "https://api.kimi.com/coding/", .kimi),
+            ("/Users/a/.local/bin/claude", ["claude"], "https://api.deepseek.com/anthropic", .deepseek),
+            ("/opt/homebrew/bin/node", ["node", "/opt/homebrew/bin/dsh"], nil, .deepseek),
+            ("/Users/a/.local/bin/deepseek-tui", ["deepseek-tui"], nil, .deepseek),
             ("/Users/a/.local/bin/claude", ["claude"], "https://openrouter.ai/api", nil),
             ("/Users/a/.local/bin/claude", ["claude"], "https://api.notz.ai/anthropic", nil),
             ("/opt/homebrew/bin/node", ["node", "/Users/a/.local/bin/codex"], zai, .codex),

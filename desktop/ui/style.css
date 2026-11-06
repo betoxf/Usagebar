@@ -1,0 +1,250 @@
+:root {
+  --text: #1b1b1b;
+  --muted: rgba(0, 0, 0, 0.56);
+  --panel: rgba(249, 249, 249, 0.84);
+  --card: rgba(255, 255, 255, 0.66);
+  --card-hover: rgba(255, 255, 255, 0.92);
+  --stroke: rgba(0, 0, 0, 0.07);
+  --track: rgba(0, 0, 0, 0.09);
+  --warn: #b35900;
+  --claude: #d97757;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --text: #f3f3f3;
+    --muted: rgba(255, 255, 255, 0.6);
+    --panel: rgba(32, 32, 32, 0.8);
+    --card: rgba(255, 255, 255, 0.05);
+    --card-hover: rgba(255, 255, 255, 0.09);
+    --stroke: rgba(255, 255, 255, 0.07);
+    --track: rgba(255, 255, 255, 0.12);
+    --warn: #ffb35c;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: transparent;
+  color: var(--text);
+  font: 13px/1.35 "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Inter", "Cantarell", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  overflow: hidden;
+}
+
+#panel {
+  background: var(--panel);
+  border: 1px solid var(--stroke);
+  border-radius: 12px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 4px;
+}
+
+.title {
+  font-weight: 600;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.app-icon {
+  width: 20px;
+  height: 20px;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+footer .muted {
+  flex: 1;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  border: 0;
+  background: transparent;
+  cursor: default;
+}
+
+.icon-button {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+}
+
+.icon-button:hover,
+.text-button:hover {
+  background: var(--card-hover);
+}
+
+.icon-button svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.icon-button.spinning svg {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.text-button {
+  padding: 4px 10px;
+  border-radius: 6px;
+}
+
+#providers {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--stroke);
+  border-radius: 8px;
+  padding: 10px 12px 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  text-align: left;
+  width: 100%;
+}
+
+.card:hover {
+  background: var(--card-hover);
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 18px;
+}
+
+.name {
+  font-weight: 600;
+}
+
+.detail {
+  color: var(--muted);
+  font-size: 12px;
+  margin-left: 2px;
+  flex: 1;
+}
+
+.pin {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid var(--muted);
+}
+
+.card.in-tray .pin {
+  background: currentColor;
+  border-color: currentColor;
+}
+
+.mark {
+  display: inline-block;
+  flex: none;
+  background-color: currentColor;
+  -webkit-mask: var(--src) center / contain no-repeat;
+  mask: var(--src) center / contain no-repeat;
+}
+
+.marks {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 38px 1fr 40px 58px;
+  align-items: center;
+  gap: 8px;
+}
+
+.label,
+.reset {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.reset {
+  text-align: right;
+}
+
+.percent {
+  text-align: right;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.meter {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--track);
+  overflow: hidden;
+}
+
+.meter > span {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: currentColor;
+  transition: width 0.4s ease;
+}
+
+.card[data-provider="claude"] .meter > span {
+  background: var(--claude);
+}
+
+.error {
+  color: var(--warn);
+  font-size: 12px;
+}
+
+.empty {
+  padding: 18px 12px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.empty strong {
+  display: block;
+  color: var(--text);
+  margin-bottom: 4px;
+}

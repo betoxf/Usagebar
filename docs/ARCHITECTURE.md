@@ -106,7 +106,7 @@ DeepSeek priority is: an API key saved in Usagebar, `DEEPSEEK_API_KEY` from the 
 | DeepSeek balance with a Harness sign-in | `https://platform.deepseek.com/api/v0/users/get_user_summary` |
 | Update discovery | `https://api.github.com/repos/betoxf/Usagebar/releases/latest` |
 | z.ai quota | `https://api.z.ai/api/monitor/usage/quota/limit` |
-| QwenCloud sign-in and console page (session token) | `https://home.qwencloud.com/billing/subscription/token-plan-individual`, `https://home.qwencloud.com/tool/user/info.json` |
+| QwenCloud sign-in and console page (session token) | `https://home.qwencloud.com/analytics/token-plan?region=ap-southeast-1`, `https://home.qwencloud.com/tool/user/info.json` |
 | QwenCloud Token Plan usage and plan | `https://cs-data.qwencloud.com/data/api.json` (private console gateway) |
 
 A configured Codex base URL changes the Codex usage destination. Provider-private endpoints or payloads can change independently.

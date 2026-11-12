@@ -91,6 +91,7 @@ private struct QwenWebView: NSViewRepresentable {
         private let checkTimer = RepeatingTimer()
         private weak var webView: WKWebView?
         private var hasFinished = false
+        private var hasOpenedLogin = false
 
         init(onSignedIn: @escaping (String) -> Void) {
             self.onSignedIn = onSignedIn
@@ -107,6 +108,22 @@ private struct QwenWebView: NSViewRepresentable {
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             check()
+            // Signed out, the console shows a "Log in now" button instead of
+            // redirecting, so press it once to go straight to the sign-in.
+            guard !hasOpenedLogin, webView.url?.host == "home.qwencloud.com" else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self, weak webView] in
+                guard let self, !self.hasFinished, !self.hasOpenedLogin, let webView else { return }
+                webView.evaluateJavaScript("""
+                    (() => {
+                        const button = [...document.querySelectorAll('button')]
+                            .find(b => /log\\s*in now/i.test(b.textContent || ''));
+                        if (button) { button.click(); return true; }
+                        return false;
+                    })()
+                    """) { [weak self] result, _ in
+                    if result as? Bool == true { self?.hasOpenedLogin = true }
+                }
+            }
         }
 
         /// Sign-in providers that open a popup load in the same view instead.

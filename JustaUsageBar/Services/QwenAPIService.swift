@@ -51,7 +51,7 @@ nonisolated struct QwenUsageData: Equatable {
 final class QwenAPIService {
     static let shared = QwenAPIService()
 
-    nonisolated static let dashboardURL = URL(string: "https://home.qwencloud.com/billing/subscription/token-plan-individual")!
+    nonisolated static let dashboardURL = URL(string: "https://home.qwencloud.com/analytics/token-plan?region=ap-southeast-1")!
     private let gatewayURL = "https://cs-data.qwencloud.com/data/api.json"
     private let usageAPI = "zeldaHttp.apikeyMgr./tokenplan/personal/api/v2/usage"
     private let subscriptionAPI = "zeldaHttp.apikeyMgr./tokenplan/personal/api/v2/subscription"

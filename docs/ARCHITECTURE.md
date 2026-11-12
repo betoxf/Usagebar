@@ -19,6 +19,7 @@ flowchart LR
     Services --> Codex["OpenAI usage API"]
     Services --> Kimi["Kimi Code usage API"]
     Services --> DeepSeek["DeepSeek balance APIs"]
+    Services --> Qwen["QwenCloud console gateway"]
     UI --> Releases["GitHub Releases API"]
 ```
 
@@ -41,9 +42,11 @@ flowchart LR
 | `CodexAPIService` | Discovers Codex credentials, resolves the base URL, refreshes OAuth, and normalizes usage. |
 | `KimiAPIService` | Discovers Kimi Code CLI credentials, selects API or web-token authentication, and normalizes weekly plus five-hour usage. |
 | `ZaiAPIService` | Discovers a z.ai API key saved in Usagebar or in the environment, Keychain, or local config files and normalizes quota windows. |
+| `QwenAPIService` | Reads QwenCloud Token Plan usage (5-hour, weekly, and monthly windows) through the QwenCloud console's gateway, with the console session saved by `QwenAuthView`. Token Plan API keys cannot read their own quota. |
+| `QwenAuthView` | Signs in to the QwenCloud console in a non-persistent web view and hands back its `qwencloud.com` Cookie header. |
 | `DeepSeekAPIService` | Discovers a DeepSeek API key or DeepSeek Harness's account sign-in and normalizes the prepaid balance. |
 | `KeychainTool` | Reads a Keychain secret through `/usr/bin/security` without holding up other work when that tool has to ask. |
-| `CredentialStorage` | Encrypts Usagebar-managed Claude browser-session data and optional Kimi, z.ai, and DeepSeek credentials locally. |
+| `CredentialStorage` | Encrypts Usagebar-managed Claude browser-session data and optional Kimi, z.ai, DeepSeek, and QwenCloud credentials locally. |
 
 ## Runtime data flow
 
@@ -66,9 +69,9 @@ The browser login view owns a cancellable repeating timer. Dismantling the view 
 
 ## Focus following
 
-With Follow Active App on, the frontmost application selects the provider: Claude, ChatGPT or Codex, Cursor and Grok Bot (Cursor's agent app, on the same subscription), Kimi Code, ZCode (z.ai), and DeepSeek Harness map by bundle identifier or name. When Grok Bot is signed in to the same Cursor account, the menu titles the Cursor section "Cursor & Grok Bot"; Usagebar compares only the hashed account keys in Grok Bot's `sand-secrets.json`, never its tokens. Grok runs on the Cursor plan, so the Cursor entry, whose marks include xAI and Grok, stands for both, and Grok in front selects it. Any other application, including a terminal whose CLI has ended, leaves the last provider on screen and lets rotation resume; a manual click overrides it until the next AI app or CLI comes to the front.
+With Follow Active App on, the frontmost application selects the provider: Claude, ChatGPT or Codex, Cursor and Grok Bot (Cursor's agent app, on the same subscription), Kimi Code, ZCode (z.ai), and DeepSeek Harness map by bundle identifier or name. When Grok Bot is signed in to the same Cursor account, the menu titles the Cursor section "Cursor & Grok Bot"; Usagebar compares only the hashed account keys in Grok Bot's `sand-secrets.json`, never its tokens. Grok runs on the Cursor plan, so the Cursor entry, whose marks include xAI and Grok, stands for both, and Grok in front selects it. An AI app that turns active without a window of its own on screen (a helper, a companion panel) is followed only once it shows one, so the bar keeps the provider of the window the user is looking at; each refresh also restores the frontmost AI app's provider if the bar drifted from it. Any other application, including a terminal whose CLI has ended, leaves the last provider on screen and lets rotation resume; a manual click overrides it until the next AI app or CLI comes to the front.
 
-An application that is not mapped is checked for terminal sessions. `TerminalAgentDetector` lists pseudo-terminals by last input time, which is how `w` measures idle time, and reads the foreground processes of the most recently used session that the application hosts. A session with another application bundle among its ancestors belongs to that application; sessions under a detached server such as tmux or iTermServer count for any application that hosts a terminal. The launch path and arguments identify Claude Code, Codex, Cursor Agent, Kimi, DeepSeek Harness (`dsh`), `deepseek-tui`, and Grok, which selects Cursor. For Claude Code, `ANTHROPIC_BASE_URL` in the process environment selects z.ai, Kimi, or DeepSeek when it points at their gateway, and no provider when it points at another one.
+An application that is not mapped is checked for terminal sessions. `TerminalAgentDetector` lists pseudo-terminals by last input time, which is how `w` measures idle time, and reads the foreground processes of the most recently used session that the application hosts. A session with another application bundle among its ancestors belongs to that application; sessions under a detached server such as tmux or iTermServer count for any application that hosts a terminal. The launch path and arguments identify Claude Code, Codex, Cursor Agent, Kimi, DeepSeek Harness (`dsh`), `deepseek-tui`, Qwen Code, and Grok, which selects Cursor. For Claude Code, `ANTHROPIC_BASE_URL` in the process environment selects z.ai, Kimi, DeepSeek, or Qwen (`qwencloudapi.com`) when it points at their gateway, and no provider when it points at another one.
 
 The check runs when an application comes to the front and repeats off the main thread while that application hosts terminals: every three seconds at first, every six once the application has been in front for about fifteen seconds, and every ten in Low Power Mode. It stops while the display sleeps and when fewer than two providers can be shown. It needs no Accessibility, Automation, or Screen Recording access, and nothing it reads is stored or sent.
 
@@ -103,6 +106,8 @@ DeepSeek priority is: an API key saved in Usagebar, `DEEPSEEK_API_KEY` from the 
 | DeepSeek balance with a Harness sign-in | `https://platform.deepseek.com/api/v0/users/get_user_summary` |
 | Update discovery | `https://api.github.com/repos/betoxf/Usagebar/releases/latest` |
 | z.ai quota | `https://api.z.ai/api/monitor/usage/quota/limit` |
+| QwenCloud sign-in and console page (session token) | `https://home.qwencloud.com/billing/subscription/token-plan-individual`, `https://home.qwencloud.com/tool/user/info.json` |
+| QwenCloud Token Plan usage and plan | `https://cs-data.qwencloud.com/data/api.json` (private console gateway) |
 
 A configured Codex base URL changes the Codex usage destination. Provider-private endpoints or payloads can change independently.
 
@@ -114,7 +119,7 @@ A configured Codex base URL changes the Codex usage destination. Provider-privat
 | Launch at login | `SMAppService.mainApp` |
 | Last Cursor weekly reading | `UserDefaults`: the percentage and reset time only, so a failed weekly request keeps showing it until it resets. |
 | Terminal sign-in | A `.command` file in the temporary directory that holds only the provider's login command and deletes itself when it finishes. |
-| Claude browser-session data, OAuth mirror, and optional Kimi credential and z.ai and DeepSeek API keys | `~/Library/Application Support/JustaUsageBar/credentials.enc` |
+| Claude browser-session data, OAuth mirror, optional Kimi credential, z.ai and DeepSeek API keys, and the QwenCloud console Cookie header | `~/Library/Application Support/JustaUsageBar/credentials.enc` |
 | Provider CLI credentials | Provider-owned files or Keychain items; Kimi OAuth tokens may be refreshed in place, while other provider credentials are read only |
 
 Usagebar-managed credential data uses AES-256-GCM with a key derived from the Mac hardware UUID and an application salt.

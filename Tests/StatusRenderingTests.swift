@@ -69,6 +69,7 @@ extension AppDelegate {
         verifyPlanNames()
         verifyCursorOutage()
         verifyDeepSeek()
+        verifyQwen()
 
         viewModel.useRenderingFixtures([.claude, .codex])
         let sheet = NSImage(size: NSSize(width: 560, height: 240))
@@ -165,6 +166,31 @@ extension AppDelegate {
            let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
             try png.write(to: output)
         }
+    }
+
+    private func verifyQwen() {
+        // The gateway nests the usage document as a JSON string.
+        let inner = #"{"success":true,"data":{"per5HourPercentage":0.123,"per5HourResetTime":1784813220000,"per1WeekPercentage":0.5,"per1WeekResetTime":1785234900000}}"#
+        let wrapped = try! JSONSerialization.data(withJSONObject: ["code": "200", "data": ["DataV2": ["data": inner]]])
+        let usage = QwenAPIService.parseUsage(wrapped)
+        precondition(usage?.fiveHourUsedPercent == 12 && usage?.weeklyUsedPercent == 50, "Qwen usage ratios misread")
+        precondition(usage?.fiveHourResetAt == Date(timeIntervalSince1970: 1784813220), "Qwen reset time misread")
+        precondition(usage?.longLabel == "7d" && usage?.longIsMonthly == false, "Qwen weekly window mislabeled")
+
+        let monthly = QwenAPIService.parseUsage(Data(#"{"data":{"per1MonthPercentage":"0.9"}}"#.utf8))
+        precondition(monthly?.longUsedPercent == 90 && monthly?.longIsMonthly == true, "Qwen monthly-only plan misread")
+        precondition(QwenAPIService.parseUsage(Data(#"{"code":"NotLogined"}"#.utf8)) == nil, "Qwen error read as usage")
+        precondition(QwenAPIService.isSignedOut(Data(#"{"code":"NotLogined"}"#.utf8)), "Qwen sign-out not noticed")
+
+        let plan = Data(#"{"data":{"DataV2":{"data":"{\"data\":{\"specCode\":\"standard\",\"status\":\"VALID\"}}"}}}"#.utf8)
+        precondition(QwenAPIService.parsePlanName(plan) == "Standard", "Qwen plan misread")
+        precondition(QwenAPIService.extractSecToken(fromHTML: #"window.ALIYUN = {"secToken":"abc123"};"#) == "abc123",
+                     "Qwen sec_token not found in the page")
+        precondition(QwenAPIService.cookieValue(named: "cna", in: "a=1; cna=xyz; b=2") == "xyz", "Qwen cookie misread")
+        precondition(TerminalAgentDetector.provider(
+            executable: "/usr/local/bin/claude", arguments: ["claude"],
+            baseURL: "https://token-plan.maas.qwencloudapi.com/apps/anthropic/v1"
+        ) == .qwen, "Claude Code on the Qwen gateway not attributed to Qwen")
     }
 
     private func verifyDeepSeek() {
@@ -411,6 +437,6 @@ struct StatusRenderingTests {
         let model = UsageViewModel(startAutomatically: false)
         let output = ProcessInfo.processInfo.environment["USAGEBAR_RENDER_OUTPUT"].map { URL(fileURLWithPath: $0) }
         try AppDelegate(viewModel: model).verifyRendering(output: output)
-        print("PASS: DeepSeek credentials and balances, Cursor outages, plan names, setup status and model, setup/Claude/Codex menus, closed-menu reuse, status image caching, light/dark rendering, Claude without a 5-hour window, focus following")
+        print("PASS: DeepSeek credentials and balances, Qwen usage parsing, Cursor outages, plan names, setup status and model, setup/Claude/Codex menus, closed-menu reuse, status image caching, light/dark rendering, Claude without a 5-hour window, focus following")
     }
 }

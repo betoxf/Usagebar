@@ -14,6 +14,8 @@ nonisolated enum ProviderSignIn: Equatable {
     case terminal(executable: String, arguments: [String])
     /// Claude works without its CLI through a claude.ai sign-in inside Usagebar.
     case claudeWebsite
+    /// QwenCloud's limits come from its console, so its sign-in runs inside Usagebar.
+    case qwenWebsite
     /// Kimi Code accepts a pasted API key or web token.
     case kimiKey
     /// z.ai and DeepSeek take a pasted API key, which `page` hands out.
@@ -38,12 +40,14 @@ nonisolated enum ProviderSignIn: Equatable {
             return .apiKey(page: URL(string: "https://z.ai/manage-apikey/apikey-list")!)
         case .deepseek:
             return .apiKey(page: URL(string: "https://platform.deepseek.com/api_keys")!)
+        case .qwen:
+            return .qwenWebsite
         }
     }
 
     var buttonTitle: String {
         switch self {
-        case .terminal, .claudeWebsite: "Sign In"
+        case .terminal, .claudeWebsite, .qwenWebsite: "Sign In"
         case .kimiKey, .apiKey: "Add Key"
         case .download(let title, _): title
         }

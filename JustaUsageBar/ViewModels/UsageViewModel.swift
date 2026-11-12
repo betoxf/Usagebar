@@ -44,6 +44,11 @@ final class UsageViewModel: ObservableObject {
     @Published var deepseekUsageData: DeepSeekUsageData = .placeholder
     @Published var deepseekError: String?
 
+    // MARK: - Qwen Published Properties
+
+    @Published var qwenUsageData: QwenUsageData = .placeholder
+    @Published var qwenError: String?
+
     // MARK: - General
 
     @Published var isLoading: Bool = false
@@ -62,6 +67,7 @@ final class UsageViewModel: ObservableObject {
     @AppStorage("showZai") var showZai: Bool = true
     @AppStorage("showKimi") var showKimi: Bool = true
     @AppStorage("showDeepSeek") var showDeepSeek: Bool = true
+    @AppStorage("showQwen") var showQwen: Bool = true
     @AppStorage("animationInterval") var animationInterval: Double = 8.0
     @AppStorage("followActiveApp") var followActiveApp: Bool = true
     @AppStorage("autoUpdate") var autoUpdate: Bool = true
@@ -153,6 +159,7 @@ final class UsageViewModel: ObservableObject {
             case .kimi: return showKimi
             case .zai: return showZai
             case .deepseek: return showDeepSeek
+            case .qwen: return showQwen
             }
         })
     }
@@ -171,6 +178,7 @@ final class UsageViewModel: ObservableObject {
     var hasZaiCredentials: Bool { availableProviders.contains(.zai) }
     var hasKimiCredentials: Bool { availableProviders.contains(.kimi) }
     var hasDeepSeekCredentials: Bool { availableProviders.contains(.deepseek) }
+    var hasQwenCredentials: Bool { availableProviders.contains(.qwen) }
 
     var shouldAnimateProviders: Bool {
         !isBackgroundSuspended && !lowPowerMode &&
@@ -275,8 +283,10 @@ final class UsageViewModel: ObservableObject {
         async let deepseek = DeepSeekAPIService.shared.hasCredentials
         async let savedDeepSeek = DeepSeekAPIService.shared.hasSavedKey
         async let savedZai = ZaiAPIService.shared.hasSavedKey
+        async let qwen = QwenAPIService.shared.hasCredentials
         let (hasClaude, hasWeb, hasCodex, hasCursor, hasZai, kimiSource, saved, hasDeepSeek, savedKey, savedZaiKey) =
             await (claude, web, codex, cursor, zai, kimi, savedKimi, deepseek, savedDeepSeek, savedZai)
+        let hasQwen = await qwen
         guard !Task.isCancelled else { return }
         var available: Set<DisplayProvider> = []
         if hasClaude || hasWeb { available.insert(.claude) }
@@ -285,6 +295,7 @@ final class UsageViewModel: ObservableObject {
         if hasZai { available.insert(.zai) }
         if kimiSource != .none { available.insert(.kimi) }
         if hasDeepSeek { available.insert(.deepseek) }
+        if hasQwen { available.insert(.qwen) }
         if available != availableProviders { availableProviders = available }
         if saved != hasSavedKimiCredential { hasSavedKimiCredential = saved }
         if savedKey != hasSavedDeepSeekKey { hasSavedDeepSeekKey = savedKey }
@@ -312,7 +323,7 @@ final class UsageViewModel: ObservableObject {
             case .cursor: await CursorAPIService.shared.clearCache()
             case .kimi: await KimiAPIService.shared.clearCache()
             case .zai: await ZaiAPIService.shared.clearCache()
-            case .deepseek: break // Reads its files every time.
+            case .deepseek, .qwen: break // Read their stored credentials every time.
             }
         }
         await detectCredentials(forceReload: false)
@@ -378,6 +389,10 @@ final class UsageViewModel: ObservableObject {
                 let data = try await DeepSeekAPIService.shared.fetchUsage()
                 try Task.checkCancellation()
                 deepseekUsageData = data
+            case .qwen:
+                let data = try await QwenAPIService.shared.fetchUsage()
+                try Task.checkCancellation()
+                qwenUsageData = data
             }
             setError(nil, for: provider)
             refreshStates[provider, default: .init()].succeeded(at: Date())
@@ -395,6 +410,8 @@ final class UsageViewModel: ObservableObject {
                 setError("Signed out — run `claude` in Terminal to log in", for: provider)
             } else if provider == .deepseek, case APIError.unauthorized = error {
                 setError("DeepSeek rejected this key or sign-in", for: provider)
+            } else if provider == .qwen, case APIError.unauthorized = error {
+                setError("QwenCloud signed out — sign in again", for: provider)
             } else if provider == .zai, case APIError.unauthorized = error {
                 setError("z.ai rejected this key", for: provider)
             } else {
@@ -412,6 +429,7 @@ final class UsageViewModel: ObservableObject {
         case .zai: zaiError = message
         case .kimi: kimiError = message
         case .deepseek: deepseekError = message
+        case .qwen: qwenError = message
         }
     }
 
@@ -618,6 +636,26 @@ final class UsageViewModel: ObservableObject {
             self.zaiUsageData = .placeholder
             self.zaiError = nil
             self.refreshStates[.zai] = nil
+        })
+    }
+
+    func saveQwenCookie(_ cookie: String) {
+        changeCredentials({
+            CredentialStorage.shared.qwenCookie = cookie
+        }, reset: {
+            self.qwenUsageData = .placeholder
+            self.qwenError = nil
+            self.refreshStates[.qwen] = nil
+        })
+    }
+
+    func signOutQwen() {
+        changeCredentials({
+            CredentialStorage.shared.qwenCookie = nil
+        }, reset: {
+            self.qwenUsageData = .placeholder
+            self.qwenError = nil
+            self.refreshStates[.qwen] = nil
         })
     }
 

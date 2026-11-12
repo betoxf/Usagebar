@@ -72,6 +72,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private var terminalWatch: Task<Void, Never>?
     /// What the terminal watch last found in the frontmost app.
     private var terminalProvider: DisplayProvider?
+    /// A click picked the provider, so focus following waits for the next app switch.
+    private var isManualPick = false
 
     // Update availability state
     private var availableUpdateVersion: String?
@@ -158,6 +160,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     /// Shows the provider of the AI app in front. Any other app leaves the last
     /// provider on screen, unless an AI CLI runs in one of its terminal sessions.
     private func follow(_ app: NSRunningApplication) {
+        // An AI app can turn active with no window of its own on screen (a
+        // helper, a companion panel, a notification), while the window in front
+        // still belongs to the app the user is looking at. Only follow it once
+        // it shows a window.
+        if viewModel.followActiveApp, provider(matching: app) != nil, !hasWindowOnScreen(app) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                guard let self, NSWorkspace.shared.frontmostApplication == app, self.hasWindowOnScreen(app) else { return }
+                self.follow(app)
+            }
+            return
+        }
+        isManualPick = false
         if viewModel.followActiveApp {
             setFocus(provider(matching: app))
         }
@@ -170,6 +184,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private func resumeTerminalWatch() {
         if let app = NSWorkspace.shared.frontmostApplication {
             watchTerminalSessions(of: app)
+        }
+    }
+
+    /// Puts the frontmost AI app's provider back if the bar drifted from it,
+    /// for example after an activation that was missed or ignored.
+    private func reconcileFocusWithFrontmostApp() {
+        guard viewModel.followActiveApp, !isManualPick,
+              let app = NSWorkspace.shared.frontmostApplication,
+              let provider = provider(matching: app), provider != focusProvider,
+              hasWindowOnScreen(app) else { return }
+        follow(app)
+    }
+
+    /// Whether the app has a normal window on screen. Window owners and layers
+    /// need no Screen Recording access; titles, which this doesn't read, would.
+    private func hasWindowOnScreen(_ app: NSRunningApplication) -> Bool {
+        guard let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
+            as? [[String: Any]] else { return true }
+        let pid = app.processIdentifier
+        return windows.contains {
+            ($0[kCGWindowOwnerPID as String] as? Int).map(pid_t.init) == pid && ($0[kCGWindowLayer as String] as? Int) == 0
         }
     }
 
@@ -271,6 +306,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     @objc private func usageDataChanged() {
         if viewModel.hasCredentials {
+            reconcileFocusWithFrontmostApp()
             syncCurrentProvider()
             if currentRotationSignature != rotationSignature {
                 restartProviderAnimation()
@@ -411,8 +447,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         let hasZai = viewModel.hasZaiCredentials
         let hasKimi = viewModel.hasKimiCredentials
         let hasDeepSeek = viewModel.hasDeepSeekCredentials
+        let hasQwen = viewModel.hasQwenCredentials
 
-        if !hasClaude && !hasCodex && !hasCursor && !hasZai && !hasKimi && !hasDeepSeek {
+        if !hasClaude && !hasCodex && !hasCursor && !hasZai && !hasKimi && !hasDeepSeek && !hasQwen {
             let setupItem = NSMenuItem(title: "Set Up Usagebar…", action: #selector(showSetupWindow), keyEquivalent: "")
             setupItem.target = self
             menu.addItem(setupItem)
@@ -431,6 +468,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 case .kimi: "Kimi Code"
                 case .zai: "z.ai"
                 case .deepseek: "DeepSeek"
+                case .qwen: "Qwen"
                 }
                 let item = NSMenuItem(title: "\(title): \(viewModel.freshnessText(for: provider))", action: nil, keyEquivalent: "")
                 item.isEnabled = false
@@ -459,7 +497,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             displayMenu.addItem(onlyWeeklyItem)
 
             // Provider toggles
-            let authedProviderCount = [hasClaude, hasCodex, hasCursor, hasKimi, hasZai, hasDeepSeek].filter { $0 }.count
+            let authedProviderCount = [hasClaude, hasCodex, hasCursor, hasKimi, hasZai, hasDeepSeek, hasQwen].filter { $0 }.count
             if authedProviderCount > 0 {
                 displayMenu.addItem(NSMenuItem.separator())
 
@@ -503,6 +541,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                     deepseekToggle.target = self
                     deepseekToggle.state = viewModel.showDeepSeek ? .on : .off
                     displayMenu.addItem(deepseekToggle)
+                }
+
+                if hasQwen {
+                    let qwenToggle = NSMenuItem(title: "Show Qwen", action: #selector(toggleShowQwen), keyEquivalent: "")
+                    qwenToggle.target = self
+                    qwenToggle.state = viewModel.showQwen ? .on : .off
+                    displayMenu.addItem(qwenToggle)
                 }
 
                 // Follow-active-app + switch-interval apply once 2+ providers show.
@@ -588,6 +633,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 let forgetDeepSeek = NSMenuItem(title: "Forget Saved DeepSeek Key", action: #selector(clearDeepSeekAPIKey), keyEquivalent: "")
                 forgetDeepSeek.target = self
                 menu.addItem(forgetDeepSeek)
+            }
+
+            if hasQwen {
+                let signOutQwen = NSMenuItem(title: "Sign Out Qwen", action: #selector(signOutQwen), keyEquivalent: "")
+                signOutQwen.target = self
+                menu.addItem(signOutQwen)
             }
 
             if viewModel.availableProviders.count < DisplayProvider.allCases.count {
@@ -791,6 +842,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             ))
         }
 
+        if viewModel.hasQwenCredentials && viewModel.showQwen {
+            let qwen = viewModel.qwenUsageData
+            var rows: [UsagePanelRow] = []
+            if let fiveHour = qwen.fiveHourUsedPercent {
+                rows.append(UsagePanelRow(label: "5h", percent: fiveHour, resetText: qwen.timeUntilFiveHourReset))
+            }
+            if let weekly = qwen.weeklyUsedPercent {
+                rows.append(UsagePanelRow(label: "7d", percent: weekly, resetText: qwen.timeUntilWeeklyReset))
+            }
+            if let monthly = qwen.monthlyUsedPercent {
+                rows.append(UsagePanelRow(label: "30d", percent: monthly, resetText: qwen.timeUntilMonthlyReset))
+            }
+            if rows.isEmpty {
+                rows.append(UsagePanelRow(label: "7d", percent: 0, resetText: "--"))
+            }
+            let error = viewModel.qwenError
+            cards.append(UsagePanelCard(
+                provider: .qwen, detail: qwen.planName ?? "Token Plan", rows: rows,
+                message: error, actionTitle: error != nil ? "Sign In to QwenCloud…" : nil
+            ))
+        }
+
         return cards
     }
 
@@ -799,6 +872,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             guard let self, self.canDisplay(provider) else { return }
             // A pick in the panel wins like a click on the status item.
             self.focusProvider = nil
+            self.isManualPick = true
             self.setCurrentProvider(provider)
             self.restartProviderAnimation()
             self.updateStatusImage()
@@ -818,6 +892,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             case .zai, .deepseek:
                 self.showSetupWindow()
                 self.setupModel.enteringKeyFor = provider
+            case .qwen:
+                self.showSetupWindow()
+                self.setupModel.isSigningInToQwen = true
             case .cursor: break
             }
         }
@@ -860,6 +937,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 // for now; the next app switch (including switching back to
                 // Claude/Cursor/etc.) re-applies focus-follow.
                 focusProvider = nil
+                isManualPick = true
                 setCurrentProvider(next)
                 restartProviderAnimation()
             } else {
@@ -951,6 +1029,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             }
         case .claudeWebsite:
             setupModel.isSigningInToClaude = true
+        case .qwenWebsite:
+            setupModel.isSigningInToQwen = true
         case .kimiKey:
             authenticateKimi()
         case .apiKey:
@@ -1089,7 +1169,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             (viewModel.showCursor && viewModel.hasCursorCredentials) ||
             (viewModel.showKimi && viewModel.hasKimiCredentials) ||
             (viewModel.showZai && viewModel.hasZaiCredentials) ||
-            (viewModel.showDeepSeek && viewModel.hasDeepSeekCredentials)
+            (viewModel.showDeepSeek && viewModel.hasDeepSeekCredentials) ||
+            (viewModel.showQwen && viewModel.hasQwenCredentials)
         if !anyShown {
             viewModel[keyPath: keyPath] = true
         }
@@ -1129,6 +1210,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         viewModel.showDeepSeek.toggle()
         ensureAProviderRemainsShown(fallback: \.showDeepSeek)
         NotificationCenter.default.post(name: NSNotification.Name("SettingsChanged"), object: nil)
+    }
+
+    @objc private func toggleShowQwen() {
+        viewModel.showQwen.toggle()
+        ensureAProviderRemainsShown(fallback: \.showQwen)
+        NotificationCenter.default.post(name: NSNotification.Name("SettingsChanged"), object: nil)
+    }
+
+    @objc private func signOutQwen() {
+        viewModel.signOutQwen()
+        if !viewModel.hasCredentials {
+            stopProviderAnimation()
+            showSetupStatus()
+        } else {
+            syncCurrentProvider(persistPreference: true)
+            updateStatusImage()
+        }
+        rebuildMenu()
     }
 
     @objc private func setAnimationInterval(_ sender: NSMenuItem) {
@@ -1725,6 +1824,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             return viewModel.hasZaiCredentials
         case .deepseek:
             return viewModel.hasDeepSeekCredentials
+        case .qwen:
+            return viewModel.hasQwenCredentials
         }
     }
 
@@ -1742,6 +1843,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             return viewModel.showZai
         case .deepseek:
             return viewModel.showDeepSeek
+        case .qwen:
+            return viewModel.showQwen
         }
     }
 
@@ -1913,6 +2016,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             primary = viewModel.deepseekUsageData.isAvailable ? 1 : 0
             secondary = nil
             label = viewModel.deepseekUsageData.balanceText
+        case .qwen:
+            primary = viewModel.qwenUsageData.longUsedPercent
+            secondary = viewModel.qwenUsageData.fiveHourUsedPercent
+            label = viewModel.qwenUsageData.longLabel
         }
         return StatusRenderKey(
             provider: currentProvider, primary: primary, secondary: secondary, windowLabel: label,
@@ -1948,6 +2055,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             )
         case .deepseek:
             return createDeepSeekImage()
+        case .qwen:
+            return createQwenImage()
         }
     }
 
@@ -1957,6 +2066,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         case cursor
         case kimi
         case zai
+        case qwen
     }
 
     /// Compact status image for the single-percentage providers: brand glyph +
@@ -1985,7 +2095,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             // bar theme instead of using the accent color.
             let glyphColor: NSColor = switch glyph {
             case .cursor, .zai: isDarkMode ? NSColor.white : NSColor(white: 0.1, alpha: 1.0)
-            case .kimi: brandColor
+            case .kimi, .qwen: brandColor
             }
             if glyph == .cursor {
                 drawCursorPlanMarks(centerX: width / 2, y: 12.5, height: 8, color: glyphColor)
@@ -2231,7 +2341,87 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             transform.scale(height)
             path.transform(using: transform)
             path.fill()
+        case .qwen:
+            qwenMarkPath(in: rect).fill()
         }
+    }
+
+    /// A hexagon with a hexagonal hole, after the hexagonal Qwen mark.
+    private func qwenMarkPath(in rect: NSRect) -> NSBezierPath {
+        let path = NSBezierPath()
+        let center = NSPoint(x: rect.midX, y: rect.midY)
+        for radius in [rect.height / 2, rect.height / 4.2] {
+            for corner in 0..<6 {
+                let angle = CGFloat(corner) * .pi / 3 + .pi / 6
+                let point = NSPoint(x: center.x + radius * cos(angle), y: center.y + radius * sin(angle))
+                corner == 0 ? path.move(to: point) : path.line(to: point)
+            }
+            path.close()
+        }
+        path.windingRule = .evenOdd
+        return path
+    }
+
+    // MARK: - Qwen Image
+
+    /// The 5-hour window beside the longer one, weekly or else monthly, like Kimi.
+    private func createQwenImage() -> (NSImage, CGFloat) {
+        let showIcon = viewModel.showIcon
+        let qwen = viewModel.qwenUsageData
+        let fiveHour = qwen.fiveHourUsedPercent
+        let hasLong = qwen.weeklyUsedPercent != nil || qwen.monthlyUsedPercent != nil
+        let showOnly5hr = fiveHour != nil && (viewModel.showOnly5hr || !hasLong)
+        let showOnlyLong = !showOnly5hr && (viewModel.showOnlyWeekly || fiveHour == nil)
+        let width: CGFloat = showOnly5hr || showOnlyLong ? 50 : 80
+        let height: CGFloat = showIcon ? 22 : 16
+
+        let image = NSImage(size: NSSize(width: width, height: height))
+        image.lockFocus()
+
+        let textColor = getDarkMode() ? NSColor.white : NSColor(white: 0.25, alpha: 1.0)
+        let yOffset: CGFloat = showIcon ? 0 : 3
+
+        if showIcon {
+            let glyphSize: CGFloat = 7
+            let labelString = NSAttributedString(string: " Qwen", attributes: [
+                .font: NSFont.systemFont(ofSize: 7, weight: .semibold),
+                .foregroundColor: textColor
+            ])
+            let totalWidth = glyphSize + labelString.size().width
+            let startX = (width - totalWidth) / 2
+            drawGlyph(.qwen, in: NSRect(x: startX, y: 13, width: glyphSize, height: glyphSize), color: brandQwenColor)
+            labelString.draw(at: NSPoint(x: startX + glyphSize, y: 12))
+        }
+
+        let tinyLabelAttributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 6, weight: .regular),
+            .foregroundColor: textColor.withAlphaComponent(0.7)
+        ]
+        let valuesString = NSMutableAttributedString()
+        if !showOnlyLong, let fiveHour {
+            let color = usageHighlightColor(percentage: fiveHour, highThreshold: 90, accentColor: brandQwenColor, fallback: textColor)
+            valuesString.append(NSAttributedString(string: "5h ", attributes: tinyLabelAttributes))
+            valuesString.append(usageValueString(fiveHour, color: color))
+        }
+        if !showOnly5hr {
+            if !showOnlyLong {
+                valuesString.append(NSAttributedString(string: "  ", attributes: tinyLabelAttributes))
+            }
+            let long = qwen.longUsedPercent
+            let color = usageHighlightColor(percentage: long, highThreshold: 80, accentColor: brandQwenColor, fallback: textColor)
+            valuesString.append(NSAttributedString(string: qwen.longIsMonthly ? "M " : "W ", attributes: tinyLabelAttributes))
+            valuesString.append(usageValueString(long, color: color))
+        }
+        valuesString.draw(at: NSPoint(x: (width - valuesString.size().width) / 2, y: yOffset))
+
+        if availableUpdateVersion != nil {
+            brandClaudeColor.setFill()
+            NSBezierPath(ovalIn: NSRect(x: width - 5, y: height - 5, width: 4, height: 4)).fill()
+        }
+
+        image.unlockFocus()
+        image.isTemplate = false
+        return (image, width)
     }
 
     // MARK: - Kimi Code Image
@@ -2604,6 +2794,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 
     // The blue of DeepSeek's logo, #4D6BFE.
+    private var brandQwenColor: NSColor {
+        NSColor(red: 0.38, green: 0.36, blue: 0.93, alpha: 1.0)
+    }
+
     private var brandDeepSeekColor: NSColor {
         NSColor(red: 0.302, green: 0.42, blue: 0.996, alpha: 1.0)
     }

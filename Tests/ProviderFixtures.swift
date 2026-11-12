@@ -74,6 +74,7 @@ nonisolated func isRequestCancelled(_ error: Error) -> Bool {
     func clearDeepSeekAPIKey() {}
     func setZaiAPIKey(_ value: String) {}
     func clearZaiAPIKey() {}
+    var qwenCookie: String?
 }
 
 @ProviderActor final class ClaudeAPIService {
@@ -136,6 +137,17 @@ nonisolated struct KimiUsageData { var testValue = 0; static let placeholder = K
     func fetchUsage() async throws -> KimiUsageData {
         let value = try await FakeProviders.fetch(.kimi)
         return KimiUsageData(testValue: value)
+    }
+}
+
+nonisolated struct QwenUsageData { var testValue = 0; static let placeholder = QwenUsageData() }
+
+@ProviderActor final class QwenAPIService {
+    static let shared = QwenAPIService()
+    var hasCredentials: Bool { FakeProviders.probe(.qwen) }
+    func fetchUsage() async throws -> QwenUsageData {
+        let value = try await FakeProviders.fetch(.qwen)
+        return QwenUsageData(testValue: value)
     }
 }
 

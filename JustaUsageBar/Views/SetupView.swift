@@ -20,6 +20,7 @@ final class SetupModel: ObservableObject {
     /// Providers someone just started connecting, and when.
     @Published private(set) var connecting: [DisplayProvider: Date] = [:]
     @Published var isSigningInToClaude = false
+    @Published var isSigningInToQwen = false
     /// The row that is open to take a pasted API key.
     @Published var enteringKeyFor: DisplayProvider?
 
@@ -53,6 +54,7 @@ final class SetupModel: ObservableObject {
     func reset() {
         connecting = [:]
         isSigningInToClaude = false
+        isSigningInToQwen = false
         enteringKeyFor = nil
     }
 }
@@ -83,6 +85,11 @@ struct SetupView: View {
         .sheet(isPresented: $model.isSigningInToClaude) {
             AuthWindowView { sessionKey, organizationId in
                 viewModel.saveCredentials(sessionKey: sessionKey, organizationId: organizationId)
+            }
+        }
+        .sheet(isPresented: $model.isSigningInToQwen) {
+            QwenAuthView { cookie in
+                viewModel.saveQwenCookie(cookie)
             }
         }
     }
@@ -178,6 +185,7 @@ private struct SetupRow: View {
         case .kimi: "Kimi Code"
         case .zai: "z.ai"
         case .deepseek: "DeepSeek"
+        case .qwen: "Qwen"
         }
     }
 
@@ -192,6 +200,7 @@ private struct SetupRow: View {
         case .kimi: "Kimi Code CLI or API key"
         case .zai: "z.ai coding plan"
         case .deepseek: "DeepSeek Harness or API key"
+        case .qwen: "QwenCloud Token Plan"
         }
     }
 

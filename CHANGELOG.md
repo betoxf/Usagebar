@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.14.0](https://github.com/betoxf/Usagebar/releases/tag/v1.14.0) — 2026-11-12
+
+- Add Qwen for the QwenCloud Token Plan. **Sign In** on the Qwen row opens a QwenCloud sign-in inside Usagebar, and the menu bar and panel show the 5-hour and weekly (or monthly) windows with their resets. Claude Code pointed at the Qwen gateway, and the `qwen` CLI, select Qwen in focus following.
+- Keep showing Claude while you're in the Claude app when the ChatGPT or Codex app turns active in the background without a window.
+- Spin the panel's refresh arrow in place instead of jumping to the top of the panel and flickering.
+
 ## [1.13.0](https://github.com/betoxf/Usagebar/releases/tag/v1.13.0) — 2026-11-01
 
 - Add DeepSeek, with its official logo. It's prepaid, so the menu bar and panel show the amount you have left, and the card lists granted credits beside it. Usagebar finds a DeepSeek Harness sign-in on its own, or uses an API key.

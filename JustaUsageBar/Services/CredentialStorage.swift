@@ -22,6 +22,8 @@ final class CredentialStorage {
         var kimiCredential: String?
         var deepseekAPIKey: String?
         var zaiAPIKey: String?
+        /// The QwenCloud console's Cookie header, from Usagebar's sign-in window.
+        var qwenCookie: String?
     }
 
     nonisolated struct ClaudeOAuthCredentials: Codable, Equatable {
@@ -110,6 +112,17 @@ final class CredentialStorage {
         }
     }
 
+    var qwenCookie: String? {
+        get { cachedCredentials?.qwenCookie }
+        set {
+            if cachedCredentials == nil {
+                cachedCredentials = Credentials()
+            }
+            cachedCredentials?.qwenCookie = newValue
+            removeEmptyCredentialFileOrSave()
+        }
+    }
+
     func setWebSession(sessionKey: String, organizationId: String) {
         if cachedCredentials == nil { cachedCredentials = Credentials() }
         cachedCredentials?.sessionKey = sessionKey
@@ -171,7 +184,8 @@ final class CredentialStorage {
             cachedCredentials?.claudeOAuth == nil &&
             cachedCredentials?.kimiCredential == nil &&
             cachedCredentials?.deepseekAPIKey == nil &&
-            cachedCredentials?.zaiAPIKey == nil
+            cachedCredentials?.zaiAPIKey == nil &&
+            cachedCredentials?.qwenCookie == nil
         if isEmpty {
             cachedCredentials = nil
             try? FileManager.default.removeItem(at: credentialsFileURL)

@@ -39,6 +39,7 @@ xcrun swiftc -swift-version 5 -default-isolation MainActor -parse-as-library -O 
   "$ROOT_DIR"/JustaUsageBar/Models/*.swift \
   "$ROOT_DIR"/JustaUsageBar/Services/*.swift \
   "$ROOT_DIR/JustaUsageBar/Views/AuthWebView.swift" \
+  "$ROOT_DIR/JustaUsageBar/Views/QwenAuthView.swift" \
   "$ROOT_DIR/JustaUsageBar/Views/PopoverView.swift" \
   "$ROOT_DIR/JustaUsageBar/Views/SettingsView.swift" \
   "$ROOT_DIR/JustaUsageBar/Views/SetupView.swift" \

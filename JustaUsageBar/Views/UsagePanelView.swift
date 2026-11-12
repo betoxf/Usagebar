@@ -285,6 +285,13 @@ struct ProviderMark: View {
             } else {
                 Text("DeepSeek").fontWeight(.semibold)
             }
+        case .qwen:
+            HStack(spacing: 5) {
+                Image(systemName: "hexagon.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Color(red: 0.38, green: 0.36, blue: 0.93))
+                Text("Qwen").fontWeight(.semibold)
+            }
         }
     }
 
@@ -327,10 +334,14 @@ private struct PanelIconButton: View {
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 13, weight: .medium))
-                .rotationEffect(.degrees(spinning ? 360 : 0))
-                .animation(spinning ? .linear(duration: 0.8).repeatForever(autoreverses: false) : .default, value: spinning)
+            // The angle follows the clock instead of a repeating implicit
+            // animation, which also caught the panel's layout changes and sent
+            // the icon flying across the header.
+            TimelineView(.animation(paused: !spinning)) { context in
+                Image(systemName: systemName)
+                    .font(.system(size: 13, weight: .medium))
+                    .rotationEffect(.degrees(spinning ? Self.angle(at: context.date) : 0))
+            }
                 .frame(width: 28, height: 28)
                 .background(RoundedRectangle(cornerRadius: 6).fill(hovering ? Color.primary.opacity(0.08) : .clear))
                 .contentShape(Rectangle())
@@ -338,6 +349,11 @@ private struct PanelIconButton: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .help(help)
+    }
+
+    /// One turn every 0.8 seconds.
+    private static func angle(at date: Date) -> Double {
+        date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 0.8) / 0.8 * 360
     }
 }
 

@@ -50,6 +50,7 @@ nonisolated enum TerminalAgentDetector {
             case "kimi", "kimi-cli", "kimi-code": return .kimi
             case "grok": return .cursor
             case "dsh", "deepseek", "deepseek-tui": return .deepseek
+            case "qwen", "qwen-code": return .qwen
             default: break
             }
             // Versioned installs and package entry points do not carry the tool's name.
@@ -70,6 +71,7 @@ nonisolated enum TerminalAgentDetector {
         if isWithin("z.ai") || isWithin("bigmodel.cn") { return .zai }
         if isWithin("kimi.com") { return .kimi }
         if isWithin("deepseek.com") { return .deepseek }
+        if isWithin("qwencloudapi.com") { return .qwen }
         return nil
     }
 

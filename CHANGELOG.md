@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## [1.14.0](https://github.com/betoxf/Usagebar/releases/tag/v1.14.0) — 2026-11-12
 
 - Add Qwen for the QwenCloud Token Plan. **Sign In** on the Qwen row opens a QwenCloud sign-in inside Usagebar, and the menu bar and panel show the 5-hour and weekly (or monthly) windows with their resets. Claude Code pointed at the Qwen gateway, and the `qwen` CLI, select Qwen in focus following.
 - Keep showing Claude while you're in the Claude app when the ChatGPT or Codex app turns active in the background without a window.

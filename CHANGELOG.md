@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.14.2](https://github.com/betoxf/Usagebar/releases/tag/v1.14.2) — 2026-11-14
+
+- Never sign you out of Claude Code or Codex. Usagebar used to refresh their sign-ins with their own refresh tokens and keep the new ones to itself, which left the CLI holding a token that no longer worked. Now it only reads what Claude Code and Codex saved. When a sign-in has expired, the card keeps your last reading and says to open Claude Code or Codex, and picks up the renewed sign-in on its own.
+
 ## [1.14.1](https://github.com/betoxf/Usagebar/releases/tag/v1.14.1) — 2026-11-14
 
 - Keep showing Claude while you're in the Claude app when a Codex helper, such as Codex's computer-use service, turns active in the background. Helpers without a Dock icon no longer move the menu bar.

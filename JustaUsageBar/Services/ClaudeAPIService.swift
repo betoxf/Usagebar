@@ -13,6 +13,8 @@ nonisolated enum APIError: Error, LocalizedError {
     case networkError(Error)
     case decodingError(Error)
     case unknown(Int)
+    /// The CLI that owns the sign-in has to renew it; Usagebar never does.
+    case cliSignInExpired(tool: String)
 
     var isRateLimited: Bool {
         if case .rateLimited = self { return true }
@@ -40,6 +42,8 @@ nonisolated enum APIError: Error, LocalizedError {
             return "Failed to parse response: \(error.localizedDescription)"
         case .unknown(let code):
             return "Unknown error (status: \(code))"
+        case .cliSignInExpired(let tool):
+            return "Open \(tool) to renew its sign-in — showing the last reading"
         }
     }
 }

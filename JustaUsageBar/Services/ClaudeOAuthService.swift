@@ -12,8 +12,6 @@ import Security
 final class ClaudeOAuthService {
     static let shared = ClaudeOAuthService()
 
-    private let oauthClientId = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
-    private let tokenEndpoint = "https://platform.claude.com/v1/oauth/token"
     private let usageEndpoint = "https://api.anthropic.com/api/oauth/usage"
     private let oauthUserAgent = "claude-code/2.1.0"
     private let claudeKeychainService = "Claude Code-credentials"
@@ -27,7 +25,6 @@ final class ClaudeOAuthService {
 
     nonisolated struct OAuthCredentials {
         var accessToken: String
-        var refreshToken: String?
         var expiresAt: Date?
         var scopes: [String]
         var subscriptionType: String?
@@ -116,7 +113,6 @@ final class ClaudeOAuthService {
             return nil
         }
 
-        let refreshToken = oauth["refreshToken"] as? String
         var expiresAt: Date?
         if let expiresMs = oauth["expiresAt"] as? Double {
             expiresAt = Date(timeIntervalSince1970: expiresMs / 1000.0)
@@ -125,7 +121,6 @@ final class ClaudeOAuthService {
 
         return OAuthCredentials(
             accessToken: accessToken,
-            refreshToken: refreshToken,
             expiresAt: expiresAt,
             scopes: scopes,
             subscriptionType: oauth["subscriptionType"] as? String,
@@ -274,37 +269,14 @@ final class ClaudeOAuthService {
             throw APIError.noCredentials
         }
 
-        // Refresh slightly before expiry to avoid a stale-token race in the menu refresh loop.
+        // Claude Code owns this sign-in and rotates its refresh token. Refreshing
+        // here would leave Claude Code holding a dead refresh token and sign it
+        // out, so an expired token waits for Claude Code to renew it.
         if isExpired(creds) {
-            // Claude Code proactively refreshes its own token. Before we rotate
-            // the refresh token ourselves (which would invalidate Claude Code's
-            // copy and vice-versa), force-reload every source in case Claude Code
-            // already has a newer token waiting.
-            if let reloaded = loadCredentials(forceReload: true), !isExpired(reloaded) {
-                creds = reloaded
-            } else if let refreshToken = creds.refreshToken {
-                do {
-                    creds = try await refreshAccessToken(refreshToken: refreshToken)
-                    cache(credentials: creds, persist: true)
-                } catch let rateLimitError as APIError where rateLimitError.isRateLimited {
-                    // Temporary throttle: keep the mirror, try again next tick.
-                    throw rateLimitError
-                } catch let error where isRequestCancelled(error) {
-                    throw CancellationError()
-                } catch {
-                    // The persisted mirror can hold a dead refresh token while the
-                    // Claude CLI keychain/file has a fresh one. Drop the mirror and
-                    // rediscover once instead of staying stuck signed out.
-                    clearPersistedCredentials()
-                    if allowRediscovery {
-                        return try await fetchUsage(allowRediscovery: false)
-                    }
-                    throw APIError.unauthorized
-                }
-            } else {
-                clearPersistedCredentials()
-                throw APIError.unauthorized
+            guard let reloaded = loadCredentials(forceReload: true), !isExpired(reloaded) else {
+                throw APIError.cliSignInExpired(tool: "Claude Code")
             }
+            creds = reloaded
         }
 
         guard let url = URL(string: usageEndpoint) else {
@@ -331,94 +303,20 @@ final class ClaudeOAuthService {
         case 429:
             throw APIError.rateLimited(retryAfter: HTTPRetryAfter.date(from: httpResponse))
         case 400, 401, 403:
-            // Try refresh once
-            if let refreshToken = creds.refreshToken {
-                do {
-                    let newCreds = try await refreshAccessToken(refreshToken: refreshToken)
-                    cache(credentials: newCreds, persist: true)
-
-                    var retryRequest = request
-                    retryRequest.setValue("Bearer \(newCreds.accessToken)", forHTTPHeaderField: "Authorization")
-                    let (retryData, retryResponse) = try await ProviderHTTP.data(for: retryRequest)
-                    if let http = retryResponse as? HTTPURLResponse, http.statusCode == 429 {
-                        throw APIError.rateLimited(retryAfter: HTTPRetryAfter.date(from: http))
-                    }
-                    guard let retryHttp = retryResponse as? HTTPURLResponse, retryHttp.statusCode == 200 else {
-                        clearPersistedCredentials()
-                        throw APIError.unauthorized
-                    }
-                    return try parseOAuthUsageResponse(retryData, planName: newCreds.planName)
-                } catch let rateLimitError as APIError where rateLimitError.isRateLimited {
-                    // Temporary throttle: keep credentials, try again next tick.
-                    throw rateLimitError
-                } catch let error where isRequestCancelled(error) {
-                    throw CancellationError()
-                } catch {
-                    clearPersistedCredentials()
-                    throw APIError.unauthorized
-                }
-            }
-            if Self.isExpiredOAuthResponse(data) {
-                clearPersistedCredentials()
-                throw APIError.unauthorized
-            }
+            // Usagebar's mirror may hold an older token than Claude Code's own
+            // copy, so drop it and look again once before giving up.
             clearPersistedCredentials()
+            if allowRediscovery, let reloaded = loadCredentials(forceReload: true),
+               reloaded.accessToken != creds.accessToken, !isExpired(reloaded) {
+                return try await fetchUsage(allowRediscovery: false)
+            }
+            if Self.isExpiredOAuthResponse(data) || isExpired(creds) {
+                throw APIError.cliSignInExpired(tool: "Claude Code")
+            }
             throw httpResponse.statusCode == 400 ? APIError.unknown(httpResponse.statusCode) : APIError.unauthorized
         default:
             throw APIError.unknown(httpResponse.statusCode)
         }
-    }
-
-    // MARK: - Token Refresh
-
-    private func refreshAccessToken(refreshToken: String) async throws -> OAuthCredentials {
-        guard let url = URL(string: tokenEndpoint) else {
-            throw APIError.invalidURL
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-
-        var components = URLComponents()
-        components.queryItems = [
-            URLQueryItem(name: "grant_type", value: "refresh_token"),
-            URLQueryItem(name: "refresh_token", value: refreshToken),
-            URLQueryItem(name: "client_id", value: oauthClientId)
-        ]
-        request.httpBody = components.percentEncodedQuery?.data(using: .utf8)
-
-        let (data, response) = try await ProviderHTTP.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw APIError.unknown(0)
-        }
-        if httpResponse.statusCode == 429 {
-            throw APIError.rateLimited(retryAfter: HTTPRetryAfter.date(from: httpResponse))
-        }
-        guard httpResponse.statusCode == 200 else {
-            throw APIError.unauthorized
-        }
-
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let accessToken = json["access_token"] as? String else {
-            throw APIError.decodingError(NSError(domain: "OAuth", code: 0, userInfo: [NSLocalizedDescriptionKey: "Invalid refresh response"]))
-        }
-
-        let newRefreshToken = json["refresh_token"] as? String ?? refreshToken
-        var expiresAt: Date?
-        if let expiresIn = json["expires_in"] as? Double {
-            expiresAt = Date().addingTimeInterval(expiresIn)
-        }
-
-        return OAuthCredentials(
-            accessToken: accessToken,
-            refreshToken: newRefreshToken,
-            expiresAt: expiresAt,
-            scopes: cachedCredentials?.scopes ?? [],
-            subscriptionType: cachedCredentials?.subscriptionType,
-            rateLimitTier: cachedCredentials?.rateLimitTier
-        )
     }
 
     private func cache(credentials: OAuthCredentials, persist: Bool = false) {
@@ -431,7 +329,8 @@ final class ClaudeOAuthService {
 
         CredentialStorage.shared.claudeOAuthCredentials = .init(
             accessToken: credentials.accessToken,
-            refreshToken: credentials.refreshToken,
+            // Claude Code's refresh token is its own, so the mirror never keeps it.
+            refreshToken: nil,
             expiresAt: credentials.expiresAt,
             scopes: credentials.scopes,
             subscriptionType: credentials.subscriptionType,
@@ -446,7 +345,6 @@ final class ClaudeOAuthService {
 
         return OAuthCredentials(
             accessToken: stored.accessToken,
-            refreshToken: stored.refreshToken,
             expiresAt: stored.expiresAt,
             scopes: stored.scopes,
             subscriptionType: stored.subscriptionType,

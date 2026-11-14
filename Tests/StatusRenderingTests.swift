@@ -409,6 +409,23 @@ extension AppDelegate {
             let url = output.deletingPathExtension().appendingPathExtension("\(name).png")
             try bitmap.representation(using: .png, properties: [:])?.write(to: url)
         }
+
+        viewModel.useRenderingFixtures([.claude, .codex, .deepseek])
+        viewModel.showDeepSeek = true
+        isPanelOpen = true
+        updatePanel()
+        for (name, appearance) in [("panel-light", NSAppearance.Name.aqua), ("panel-dark", .darkAqua)] {
+            let view = NSHostingView(rootView: UsagePanelView(model: panelModel))
+            view.appearance = NSAppearance(named: appearance)
+            view.frame = NSRect(origin: .zero, size: view.fittingSize)
+            view.layoutSubtreeIfNeeded()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+            guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
+            view.cacheDisplay(in: view.bounds, to: bitmap)
+            let url = output.deletingPathExtension().appendingPathExtension("\(name).png")
+            try bitmap.representation(using: .png, properties: [:])?.write(to: url)
+        }
+        isPanelOpen = false
     }
 }
 

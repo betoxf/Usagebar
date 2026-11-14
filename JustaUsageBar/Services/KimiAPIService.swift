@@ -131,10 +131,6 @@ final class KimiAPIService {
         return normalized(credential.accessToken) != nil || normalized(credential.refreshToken) != nil
     }
 
-    var hasSavedCredential: Bool {
-        normalized(CredentialStorage.shared.kimiCredential) != nil
-    }
-
     var detectedAuthSource: KimiAuthSource {
         let environment = ProcessInfo.processInfo.environment
         if let stored = normalized(CredentialStorage.shared.kimiCredential), !isWebToken(stored) {

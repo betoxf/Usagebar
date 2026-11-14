@@ -118,7 +118,7 @@ Download `Usagebar.zip` from the [latest release](https://github.com/betoxf/Usag
 
 1. Install and launch Usagebar.
 2. If you already use the provider CLIs, Usagebar discovers their local credentials automatically.
-3. Otherwise the setup window opens. Click **Sign In** next to each tool you use and it shows **Connected** on its own when you finish. To open it again, click **Usagebar Setup** in the menu bar, or choose **Connect More Tools…** under the panel's **⋯** button.
+3. Otherwise the setup window opens. Click **Sign In** next to each tool you use and it shows **Connected** on its own when you finish. To open it again, click **Usagebar Setup** in the menu bar, or choose **Connections…** under the panel's **⋯** button. Click **Connected** on a row to disconnect that tool.
 4. Right-click the menu-bar item to open the usage panel. Left-click switches providers. Settings are under the panel's **⋯** button.
 
 ### Connect your tools

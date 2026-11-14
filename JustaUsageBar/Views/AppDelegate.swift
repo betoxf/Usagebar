@@ -160,6 +160,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     /// Shows the provider of the AI app in front. Any other app leaves the last
     /// provider on screen, unless an AI CLI runs in one of its terminal sessions.
     private func follow(_ app: NSRunningApplication) {
+        // AI companies ship menu bar helpers and background agents, such as
+        // Codex's computer-use service, that turn active while the user still
+        // looks at another app. Only an AI app with a Dock icon moves the bar.
+        if provider(matching: app) != nil, app.activationPolicy != .regular { return }
         // An AI app can turn active with no window of its own on screen (a
         // helper, a companion panel, a notification), while the window in front
         // still belongs to the app the user is looking at. Only follow it once
@@ -604,48 +608,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
             menu.addItem(NSMenuItem.separator())
 
-            // Sign out options
-            if hasClaude {
-                let signOutClaude = NSMenuItem(title: "Sign Out Claude", action: #selector(signOutClaude), keyEquivalent: "")
-                signOutClaude.target = self
-                menu.addItem(signOutClaude)
-            }
-
-            if hasCodex {
-                let signOutCodex = NSMenuItem(title: "Sign Out Codex", action: #selector(signOutCodex), keyEquivalent: "")
-                signOutCodex.target = self
-                menu.addItem(signOutCodex)
-            }
-
-            if viewModel.hasSavedKimiCredential {
-                let forgetKimi = NSMenuItem(title: "Forget Saved Kimi Code Credential", action: #selector(clearKimiCredential), keyEquivalent: "")
-                forgetKimi.target = self
-                menu.addItem(forgetKimi)
-            }
-
-            if viewModel.hasSavedZaiKey {
-                let forgetZai = NSMenuItem(title: "Forget Saved z.ai Key", action: #selector(clearZaiAPIKey), keyEquivalent: "")
-                forgetZai.target = self
-                menu.addItem(forgetZai)
-            }
-
-            if viewModel.hasSavedDeepSeekKey {
-                let forgetDeepSeek = NSMenuItem(title: "Forget Saved DeepSeek Key", action: #selector(clearDeepSeekAPIKey), keyEquivalent: "")
-                forgetDeepSeek.target = self
-                menu.addItem(forgetDeepSeek)
-            }
-
-            if hasQwen {
-                let signOutQwen = NSMenuItem(title: "Sign Out Qwen", action: #selector(signOutQwen), keyEquivalent: "")
-                signOutQwen.target = self
-                menu.addItem(signOutQwen)
-            }
-
-            if viewModel.availableProviders.count < DisplayProvider.allCases.count {
-                let connectItem = NSMenuItem(title: "Connect More Tools…", action: #selector(showSetupWindow), keyEquivalent: "")
-                connectItem.target = self
-                menu.addItem(connectItem)
-            }
+            // Every sign-in, with Connect and Disconnect, lives in one window.
+            let connectionsItem = NSMenuItem(title: "Connections…", action: #selector(showSetupWindow), keyEquivalent: "")
+            connectionsItem.target = self
+            menu.addItem(connectionsItem)
         }
 
         menu.addItem(NSMenuItem.separator())
@@ -960,6 +926,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             setupModel.cursorMarks = panelModel.cursorMarks
             setupModel.zcodeMark = panelModel.zcodeMark
             setupModel.onConnect = { [weak self] in self?.connect($0) }
+            setupModel.onDisconnect = { [weak self] in self?.viewModel.disconnect($0) }
             setupModel.onSaveKey = { [weak self] provider, key in
                 if provider == .zai {
                     self?.viewModel.saveZaiAPIKey(key)
@@ -977,7 +944,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                 backing: .buffered,
                 defer: false
             )
-            window.title = "Set Up Usagebar"
+            window.title = "Usagebar Connections"
             window.titleVisibility = .hidden
             window.titlebarAppearsTransparent = true
             window.standardWindowButton(.miniaturizeButton)?.isHidden = true
@@ -1015,6 +982,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     private func connect(_ provider: DisplayProvider) {
         guard let signIn = setupModel.signIns[provider] else { return }
+        // A disconnected tool may still be signed in, so look before asking again.
+        guard !viewModel.disconnectedProviders.contains(provider) else {
+            Task { [weak self] in
+                guard let self else { return }
+                await self.viewModel.reconnect(provider)
+                _ = self.setupModel.update(available: self.viewModel.availableProviders)
+                if !self.viewModel.availableProviders.contains(provider) {
+                    self.startSignIn(provider, signIn)
+                }
+            }
+            return
+        }
+        startSignIn(provider, signIn)
+    }
+
+    private func startSignIn(_ provider: DisplayProvider, _ signIn: ProviderSignIn) {
         switch signIn {
         case .terminal:
             let name = provider.rawValue.capitalized
@@ -1218,18 +1201,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         NotificationCenter.default.post(name: NSNotification.Name("SettingsChanged"), object: nil)
     }
 
-    @objc private func signOutQwen() {
-        viewModel.signOutQwen()
-        if !viewModel.hasCredentials {
-            stopProviderAnimation()
-            showSetupStatus()
-        } else {
-            syncCurrentProvider(persistPreference: true)
-            updateStatusImage()
-        }
-        rebuildMenu()
-    }
-
     @objc private func setAnimationInterval(_ sender: NSMenuItem) {
         viewModel.animationInterval = Double(sender.tag)
         if viewModel.animationInterval == 0 {
@@ -1246,66 +1217,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
     @objc private func toggleLaunchAtLogin() {
         viewModel.launchAtStartup.toggle()
-        rebuildMenu()
-    }
-
-    @objc private func signOutClaude() {
-        viewModel.clearClaudeCredentials()
-        if !viewModel.hasCredentials {
-            stopProviderAnimation()
-            showSetupStatus()
-        } else {
-            syncCurrentProvider(persistPreference: true)
-            updateStatusImage()
-        }
-        rebuildMenu()
-    }
-
-    @objc private func signOutCodex() {
-        viewModel.clearCodexCredentials()
-        if !viewModel.hasCredentials {
-            stopProviderAnimation()
-            showSetupStatus()
-        } else {
-            syncCurrentProvider(persistPreference: true)
-            updateStatusImage()
-        }
-        rebuildMenu()
-    }
-
-    @objc private func clearKimiCredential() {
-        viewModel.clearKimiCredential()
-        if !viewModel.hasCredentials {
-            stopProviderAnimation()
-            showSetupStatus()
-        } else {
-            syncCurrentProvider(persistPreference: true)
-            updateStatusImage()
-        }
-        rebuildMenu()
-    }
-
-    @objc private func clearZaiAPIKey() {
-        viewModel.clearZaiAPIKey()
-        if !viewModel.hasCredentials {
-            stopProviderAnimation()
-            showSetupStatus()
-        } else {
-            syncCurrentProvider(persistPreference: true)
-            updateStatusImage()
-        }
-        rebuildMenu()
-    }
-
-    @objc private func clearDeepSeekAPIKey() {
-        viewModel.clearDeepSeekAPIKey()
-        if !viewModel.hasCredentials {
-            stopProviderAnimation()
-            showSetupStatus()
-        } else {
-            syncCurrentProvider(persistPreference: true)
-            updateStatusImage()
-        }
         rebuildMenu()
     }
 

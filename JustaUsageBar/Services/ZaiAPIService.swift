@@ -64,10 +64,6 @@ final class ZaiAPIService {
         apiKey() != nil
     }
 
-    var hasSavedKey: Bool {
-        CredentialStorage.shared.zaiAPIKey != nil
-    }
-
     /// Resolves a key saved in Usagebar first, then the environment, then a small
     /// set of known local config files. Returns nil when Z.ai isn't configured.
     private func apiKey() -> String? {

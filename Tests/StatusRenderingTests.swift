@@ -10,11 +10,6 @@ extension UsageViewModel {
             refreshStates[provider, default: .init()].succeeded(at: Date())
         }
     }
-
-    fileprivate func useSavedKeyFixtures(_ saved: Bool) {
-        hasSavedDeepSeekKey = saved
-        hasSavedZaiKey = saved
-    }
 }
 
 extension AppDelegate {
@@ -44,7 +39,7 @@ extension AppDelegate {
                 precondition(menu.items.contains { $0.title == "Refresh" })
                 let updates = menu.items.first { $0.title == "Last Updates" }?.submenu
                 precondition(updates?.numberOfItems == providers.count)
-                precondition(menu.items.contains { $0.title == "Connect More Tools…" })
+                precondition(menu.items.contains { $0.title == "Connections…" })
             }
             menuDidClose(menu)
             let firstItem = menu.items.first
@@ -294,14 +289,9 @@ extension AppDelegate {
 
         viewModel.useRenderingFixtures([.deepseek])
         viewModel.showDeepSeek = true
-        viewModel.useSavedKeyFixtures(true)
         menuWillOpen(menu)
-        precondition(menu.items.contains { $0.title == "Forget Saved DeepSeek Key" } && menu.items.contains { $0.title == "Forget Saved z.ai Key" },
-                     "A saved key could not be forgotten")
-        menuDidClose(menu)
-        viewModel.useSavedKeyFixtures(false)
-        menuWillOpen(menu)
-        precondition(!menu.items.contains { $0.title.hasPrefix("Forget Saved") }, "Forget appeared with nothing saved")
+        precondition(!menu.items.contains { $0.title.hasPrefix("Forget Saved") || $0.title.hasPrefix("Sign Out") },
+                     "Sign-outs belong in Connections")
         menuDidClose(menu)
 
         viewModel.deepseekUsageData = keyed ?? .placeholder

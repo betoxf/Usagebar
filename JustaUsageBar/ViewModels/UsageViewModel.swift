@@ -71,6 +71,9 @@ final class UsageViewModel: ObservableObject {
     @AppStorage("animationInterval") var animationInterval: Double = 8.0
     @AppStorage("followActiveApp") var followActiveApp: Bool = true
     @AppStorage("autoUpdate") var autoUpdate: Bool = true
+    /// Tools the user disconnected. A CLI's own sign-in stays where it is;
+    /// Usagebar just leaves it alone until the tool is connected again.
+    @AppStorage("disconnectedProviders") private var disconnectedProvidersValue = ""
 
     // Launch at login using SMAppService (macOS 13+)
     var launchAtStartup: Bool {
@@ -98,9 +101,6 @@ final class UsageViewModel: ObservableObject {
     // MARK: - Refresh scheduling
 
     @Published private(set) var availableProviders: Set<DisplayProvider> = []
-    @Published private(set) var hasSavedKimiCredential = false
-    @Published private(set) var hasSavedDeepSeekKey = false
-    @Published private(set) var hasSavedZaiKey = false
     @Published private(set) var refreshStates: [DisplayProvider: ProviderRefreshState] = [:]
     @Published private(set) var isBackgroundSuspended = false
 
@@ -279,13 +279,10 @@ final class UsageViewModel: ObservableObject {
         async let cursor = CursorAPIService.shared.hasCredentials
         async let zai = ZaiAPIService.shared.hasCredentials
         async let kimi = KimiAPIService.shared.detectedAuthSource
-        async let savedKimi = KimiAPIService.shared.hasSavedCredential
         async let deepseek = DeepSeekAPIService.shared.hasCredentials
-        async let savedDeepSeek = DeepSeekAPIService.shared.hasSavedKey
-        async let savedZai = ZaiAPIService.shared.hasSavedKey
         async let qwen = QwenAPIService.shared.hasCredentials
-        let (hasClaude, hasWeb, hasCodex, hasCursor, hasZai, kimiSource, saved, hasDeepSeek, savedKey, savedZaiKey) =
-            await (claude, web, codex, cursor, zai, kimi, savedKimi, deepseek, savedDeepSeek, savedZai)
+        let (hasClaude, hasWeb, hasCodex, hasCursor, hasZai, kimiSource, hasDeepSeek) =
+            await (claude, web, codex, cursor, zai, kimi, deepseek)
         let hasQwen = await qwen
         guard !Task.isCancelled else { return }
         var available: Set<DisplayProvider> = []
@@ -296,10 +293,8 @@ final class UsageViewModel: ObservableObject {
         if kimiSource != .none { available.insert(.kimi) }
         if hasDeepSeek { available.insert(.deepseek) }
         if hasQwen { available.insert(.qwen) }
+        available.subtract(disconnectedProviders)
         if available != availableProviders { availableProviders = available }
-        if saved != hasSavedKimiCredential { hasSavedKimiCredential = saved }
-        if savedKey != hasSavedDeepSeekKey { hasSavedDeepSeekKey = savedKey }
-        if savedZaiKey != hasSavedZaiKey { hasSavedZaiKey = savedZaiKey }
         claudeAuthSource = hasClaude ? .oauth : (hasWeb ? .webSession : .none)
         kimiAuthSource = kimiSource
         knownTargets = refreshTargets
@@ -552,6 +547,7 @@ final class UsageViewModel: ObservableObject {
     }
 
     func saveCredentials(sessionKey: String, organizationId: String) {
+        disconnectedProviders.remove(.claude)
         changeCredentials {
             CredentialStorage.shared.setWebSession(
                 sessionKey: sessionKey.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -580,6 +576,7 @@ final class UsageViewModel: ObservableObject {
     }
 
     func saveKimiCredential(_ credential: String) {
+        disconnectedProviders.remove(.kimi)
         changeCredentials {
             CredentialStorage.shared.setKimiCredential(credential.trimmingCharacters(in: .whitespacesAndNewlines))
         }
@@ -599,6 +596,7 @@ final class UsageViewModel: ObservableObject {
     /// A new key starts clean, so it neither shows the old account's reading nor
     /// waits out the old key's cooldown.
     func saveDeepSeekAPIKey(_ key: String) {
+        disconnectedProviders.remove(.deepseek)
         changeCredentials({
             CredentialStorage.shared.setDeepSeekAPIKey(key.trimmingCharacters(in: .whitespacesAndNewlines))
         }, reset: {
@@ -619,6 +617,7 @@ final class UsageViewModel: ObservableObject {
     }
 
     func saveZaiAPIKey(_ key: String) {
+        disconnectedProviders.remove(.zai)
         changeCredentials({
             CredentialStorage.shared.setZaiAPIKey(key.trimmingCharacters(in: .whitespacesAndNewlines))
         }, reset: {
@@ -639,7 +638,38 @@ final class UsageViewModel: ObservableObject {
         })
     }
 
+    var disconnectedProviders: Set<DisplayProvider> {
+        get { Set(disconnectedProvidersValue.split(separator: ",").compactMap { DisplayProvider(rawValue: String($0)) }) }
+        set { disconnectedProvidersValue = newValue.map(\.rawValue).sorted().joined(separator: ",") }
+    }
+
+    /// Stops using a tool and forgets anything Usagebar saved for it.
+    func disconnect(_ provider: DisplayProvider) {
+        disconnectedProviders.insert(provider)
+        switch provider {
+        case .claude: clearClaudeCredentials()
+        case .codex: clearCodexCredentials()
+        case .kimi: clearKimiCredential()
+        case .zai: clearZaiAPIKey()
+        case .deepseek: clearDeepSeekAPIKey()
+        case .qwen: signOutQwen()
+        case .cursor:
+            changeCredentials({ CursorAPIService.shared.clearCache() }, reset: {
+                self.cursorUsageData = .placeholder
+                self.cursorError = nil
+                self.refreshStates[.cursor] = nil
+            })
+        }
+    }
+
+    /// Uses a disconnected tool again, finding its sign-in if it still has one.
+    func reconnect(_ provider: DisplayProvider) async {
+        disconnectedProviders.remove(provider)
+        await requestRefresh(manual: true, rediscover: true)
+    }
+
     func saveQwenCookie(_ cookie: String) {
+        disconnectedProviders.remove(.qwen)
         changeCredentials({
             CredentialStorage.shared.qwenCookie = cookie
         }, reset: {

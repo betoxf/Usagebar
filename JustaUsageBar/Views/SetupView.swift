@@ -28,6 +28,7 @@ final class SetupModel: ObservableObject {
     var zcodeMark: NSImage?
 
     var onConnect: (DisplayProvider) -> Void = { _ in }
+    var onDisconnect: (DisplayProvider) -> Void = { _ in }
     var onSaveKey: (DisplayProvider, String) -> Void = { _, _ in }
     var onClose: () -> Void = {}
 
@@ -96,10 +97,10 @@ struct SetupView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(viewModel.hasCredentials ? "You're all set" : "Welcome to Usagebar")
+            Text(viewModel.hasCredentials ? "Connections" : "Welcome to Usagebar")
                 .font(.system(size: 18, weight: .semibold))
             Text(viewModel.hasCredentials
-                 ? "Your usage is in the menu bar. Right-click it for details, or connect more tools here."
+                 ? "Your usage is in the menu bar. Connect more tools here, or click Connected to disconnect one."
                  : "Connect the AI tools you use to see your limits in the menu bar.")
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -130,6 +131,8 @@ private struct SetupRow: View {
     let isConnecting: Bool
     let signIn: ProviderSignIn?
     @ObservedObject var model: SetupModel
+    /// Clicking Connected asks before disconnecting.
+    @State private var isConfirmingDisconnect = false
 
     /// Where to get a key, while this row is open to take one. A connected row
     /// opens too, so a rejected key can be replaced.
@@ -152,13 +155,26 @@ private struct SetupRow: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("\(name). \(detail)")
                 Spacer(minLength: 8)
-                if isConnected {
-                    HStack(spacing: 4) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                            .accessibilityHidden(true)
-                        Text("Connected")
+                if isConnected, isConfirmingDisconnect {
+                    Button("Cancel") { isConfirmingDisconnect = false }
+                        .buttonStyle(.borderless)
+                    Button("Disconnect", role: .destructive) {
+                        isConfirmingDisconnect = false
+                        model.onDisconnect(provider)
                     }
+                    .accessibilityLabel("Disconnect \(name)")
+                } else if isConnected {
+                    Button { isConfirmingDisconnect = true } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                                .accessibilityHidden(true)
+                            Text("Connected")
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .help("Click to disconnect \(name)")
+                    .accessibilityLabel("\(name) connected. Disconnect")
                 } else if let signIn {
                     if isConnecting {
                         ProgressView().controlSize(.small)

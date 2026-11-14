@@ -73,10 +73,6 @@ final class DeepSeekAPIService {
         credential() != nil
     }
 
-    var hasSavedKey: Bool {
-        CredentialStorage.shared.deepseekAPIKey != nil
-    }
-
     /// Read on every use, so a rotated key or a Harness sign-out applies at once.
     private func credential() -> Credential? {
         if let saved = CredentialStorage.shared.deepseekAPIKey {

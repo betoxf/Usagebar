@@ -117,7 +117,6 @@ nonisolated struct ZaiUsageData { var testValue = 0; static let placeholder = Za
 @ProviderActor final class ZaiAPIService {
     static let shared = ZaiAPIService()
     var hasCredentials: Bool { FakeProviders.probe(.zai) }
-    var hasSavedKey: Bool { false }
     func clearCache() {}
     func fetchUsage() async throws -> ZaiUsageData {
         let value = try await FakeProviders.fetch(.zai)
@@ -133,7 +132,6 @@ nonisolated struct KimiUsageData { var testValue = 0; static let placeholder = K
     func clearCache() {}
     var lastAuthSource: KimiAuthSource { .cli }
     var detectedAuthSource: KimiAuthSource { FakeProviders.probe(.kimi) ? .cli : .none }
-    var hasSavedCredential: Bool { false }
     func fetchUsage() async throws -> KimiUsageData {
         let value = try await FakeProviders.fetch(.kimi)
         return KimiUsageData(testValue: value)
@@ -156,7 +154,6 @@ nonisolated struct DeepSeekUsageData { var testValue = 0; static let placeholder
 @ProviderActor final class DeepSeekAPIService {
     static let shared = DeepSeekAPIService()
     var hasCredentials: Bool { FakeProviders.probe(.deepseek) }
-    var hasSavedKey: Bool { false }
     func fetchUsage() async throws -> DeepSeekUsageData {
         let value = try await FakeProviders.fetch(.deepseek)
         return DeepSeekUsageData(testValue: value)

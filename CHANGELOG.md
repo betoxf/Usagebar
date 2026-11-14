@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.14.1](https://github.com/betoxf/Usagebar/releases/tag/v1.14.1) — 2026-11-14
+
+- Keep showing Claude while you're in the Claude app when a Codex helper, such as Codex's computer-use service, turns active in the background. Helpers without a Dock icon no longer move the menu bar.
+- Rename **Connect More Tools…** to **Connections…**. It's always in the menu and opens the window with every tool. Click **Connected** on a row to disconnect it.
+- Remove the separate **Sign Out** and **Forget Saved** menu items; **Disconnect** in Connections replaces them. Disconnecting forgets what Usagebar saved for that tool, and leaves a CLI's own sign-in alone.
+
 ## [1.14.0](https://github.com/betoxf/Usagebar/releases/tag/v1.14.0) — 2026-11-12
 
 - Add Qwen for the QwenCloud Token Plan. **Sign In** on the Qwen row opens a QwenCloud sign-in inside Usagebar, and the menu bar and panel show the 5-hour and weekly (or monthly) windows with their resets. Claude Code pointed at the Qwen gateway, and the `qwen` CLI, select Qwen in focus following.

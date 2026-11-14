@@ -74,14 +74,9 @@ nonisolated struct CodexUsageData {
 final class CodexAPIService {
     static let shared = CodexAPIService()
 
-    private let oauthClientId = "app_EMoamEEZ73f0CkXaXp7hrann"
-    private let tokenEndpoint = "https://auth.openai.com/oauth/token"
-
     nonisolated struct CodexCredentials {
         var accessToken: String
-        var refreshToken: String?
         var accountId: String?
-        var lastRefresh: Date?
         var isApiKey: Bool = false
     }
 
@@ -125,20 +120,7 @@ final class CodexAPIService {
         // OAuth format
         if let tokens = json["tokens"] as? [String: Any],
            let accessToken = tokens["access_token"] as? String {
-            let refreshToken = tokens["refresh_token"] as? String
-            let accountId = tokens["account_id"] as? String
-            var lastRefresh: Date?
-            if let lastRefreshStr = json["last_refresh"] as? String {
-                let formatter = ISO8601DateFormatter()
-                lastRefresh = formatter.date(from: lastRefreshStr)
-            }
-
-            let creds = CodexCredentials(
-                accessToken: accessToken,
-                refreshToken: refreshToken,
-                accountId: accountId,
-                lastRefresh: lastRefresh
-            )
+            let creds = CodexCredentials(accessToken: accessToken, accountId: tokens["account_id"] as? String)
             cachedCredentials = creds
             lastCredentialCheck = Date()
             return creds
@@ -161,17 +143,12 @@ final class CodexAPIService {
     // MARK: - Fetch Usage
 
     func fetchUsage() async throws -> CodexUsageData {
-        guard var creds = loadCredentials() else {
-            throw APIError.noCredentials
-        }
+        try await fetchUsage(allowRediscovery: true)
+    }
 
-        // Check if refresh needed (>8 days since last refresh)
-        if !creds.isApiKey,
-           let lastRefresh = creds.lastRefresh,
-           Date().timeIntervalSince(lastRefresh) > 8 * 86400,
-           let refreshToken = creds.refreshToken {
-            creds = try await refreshAccessToken(refreshToken: refreshToken)
-            cachedCredentials = creds
+    private func fetchUsage(allowRediscovery: Bool) async throws -> CodexUsageData {
+        guard let creds = loadCredentials() else {
+            throw APIError.noCredentials
         }
 
         let baseURL = getBaseURL()
@@ -206,76 +183,17 @@ final class CodexAPIService {
         case 429:
             throw APIError.rateLimited(retryAfter: HTTPRetryAfter.date(from: httpResponse))
         case 401, 403:
-            if let refreshToken = creds.refreshToken, !creds.isApiKey {
-                do {
-                    let newCreds = try await refreshAccessToken(refreshToken: refreshToken)
-                    cachedCredentials = newCreds
-                    var retryRequest = request
-                    retryRequest.setValue("Bearer \(newCreds.accessToken)", forHTTPHeaderField: "Authorization")
-                    let (retryData, retryResponse) = try await ProviderHTTP.data(for: retryRequest)
-                    if let http = retryResponse as? HTTPURLResponse, http.statusCode == 429 {
-                        throw APIError.rateLimited(retryAfter: HTTPRetryAfter.date(from: http))
-                    }
-                    guard let retryHttp = retryResponse as? HTTPURLResponse, retryHttp.statusCode == 200 else {
-                        clearCache()
-                        throw APIError.unauthorized
-                    }
-                    return try parseCodexUsageResponse(retryData)
-                } catch let error as APIError where error.isRateLimited {
-                    throw error
-                } catch let error where isRequestCancelled(error) {
-                    throw CancellationError()
-                } catch {
-                    clearCache()
-                    throw APIError.unauthorized
-                }
-            }
+            // Codex owns this sign-in, and OpenAI refresh tokens work once, so
+            // refreshing here would sign Codex out. Read Codex's file again in
+            // case it renewed the token, and otherwise wait for Codex to.
             clearCache()
-            throw APIError.unauthorized
+            if allowRediscovery, let reloaded = loadCredentials(), reloaded.accessToken != creds.accessToken {
+                return try await fetchUsage(allowRediscovery: false)
+            }
+            throw creds.isApiKey ? APIError.unauthorized : APIError.cliSignInExpired(tool: "Codex")
         default:
             throw APIError.unknown(httpResponse.statusCode)
         }
-    }
-
-    // MARK: - Token Refresh
-
-    private func refreshAccessToken(refreshToken: String) async throws -> CodexCredentials {
-        guard let url = URL(string: tokenEndpoint) else {
-            throw APIError.invalidURL
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        let body: [String: String] = [
-            "client_id": oauthClientId,
-            "grant_type": "refresh_token",
-            "refresh_token": refreshToken,
-            "scope": "openid profile email"
-        ]
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
-
-        let (data, response) = try await ProviderHTTP.data(for: request)
-
-        if let http = response as? HTTPURLResponse, http.statusCode == 429 {
-            throw APIError.rateLimited(retryAfter: HTTPRetryAfter.date(from: http))
-        }
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            throw APIError.unauthorized
-        }
-
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let accessToken = json["access_token"] as? String else {
-            throw APIError.decodingError(NSError(domain: "Codex", code: 0, userInfo: [NSLocalizedDescriptionKey: "Invalid refresh response"]))
-        }
-
-        return CodexCredentials(
-            accessToken: accessToken,
-            refreshToken: json["refresh_token"] as? String ?? refreshToken,
-            accountId: cachedCredentials?.accountId,
-            lastRefresh: Date()
-        )
     }
 
     // MARK: - Parse Response

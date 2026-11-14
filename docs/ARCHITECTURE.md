@@ -38,8 +38,8 @@ flowchart LR
 | `ProviderHTTP` | Sends every provider and release request on a short-lived session and closes it when the last request finishes. |
 | `TerminalAgentDetector` | Reads terminal sessions from the process table to tell which AI CLI is in use. |
 | `ClaudeAPIService` | Selects Claude authentication mode and normalizes responses. |
-| `ClaudeOAuthService` | Discovers Claude CLI credentials, refreshes OAuth tokens, and fetches usage. |
-| `CodexAPIService` | Discovers Codex credentials, resolves the base URL, refreshes OAuth, and normalizes usage. |
+| `ClaudeOAuthService` | Discovers Claude CLI credentials and fetches usage. It never refreshes Claude Code's token. |
+| `CodexAPIService` | Discovers Codex credentials, resolves the base URL, and normalizes usage. It never refreshes Codex's token. |
 | `KimiAPIService` | Discovers Kimi Code CLI credentials, selects API or web-token authentication, and normalizes weekly plus five-hour usage. |
 | `ZaiAPIService` | Discovers a z.ai API key saved in Usagebar or in the environment, Keychain, or local config files and normalizes quota windows. |
 | `QwenAPIService` | Reads QwenCloud Token Plan usage (5-hour, weekly, and monthly windows) through the QwenCloud console's gateway, with the console session saved by `QwenAuthView`. Token Plan API keys cannot read their own quota. |
@@ -77,7 +77,9 @@ The check runs when an application comes to the front and repeats off the main t
 
 ## Credential discovery
 
-Claude priority is: Usagebar's encrypted OAuth mirror, `~/.claude/.credentials.json`, the `Claude Code-credentials` Keychain item through `/usr/bin/security`, direct Keychain lookup, then the Usagebar-managed browser session fallback. The plan on Claude's card comes from `subscriptionType` and `rateLimitTier` in those credentials. A mirror saved before Usagebar kept them has no plan, so the Keychain is read once per launch to fill it in.
+Claude priority is: Usagebar's encrypted OAuth mirror, `~/.claude/.credentials.json`, the `Claude Code-credentials` Keychain item through `/usr/bin/security`, direct Keychain lookup, then the Usagebar-managed browser session fallback. The plan on Claude's card comes from `subscriptionType` and `rateLimitTier` in those credentials. A mirror saved before Usagebar kept them has no plan, so the Keychain is read once per launch to fill it in. The mirror holds the access token only, never Claude Code's refresh token.
+
+Usagebar never refreshes Claude Code's or Codex's OAuth tokens. Both CLIs rotate their refresh token on every refresh, and OpenAI's work only once, so a refresh by Usagebar would leave the CLI with a dead refresh token and sign it out. When a token has expired, or the usage endpoint rejects it, Usagebar rereads the CLI's own credentials once; if they are still expired, the card keeps the last reading and says to open the CLI, and the next reading after the CLI renews its token picks it up.
 
 Codex reads `${CODEX_HOME}/auth.json` or `~/.codex/auth.json`. It reads `chatgpt_base_url` from `${CODEX_HOME}/config.toml` when present and otherwise uses `https://chatgpt.com`.
 
@@ -94,10 +96,8 @@ DeepSeek priority is: an API key saved in Usagebar, `DEEPSEEK_API_KEY` from the 
 | Purpose | Default destination |
 | --- | --- |
 | Claude OAuth usage | `https://api.anthropic.com/api/oauth/usage` |
-| Claude OAuth refresh | `https://platform.claude.com/v1/oauth/token` |
 | Claude browser-session usage | `https://claude.ai/api/organizations/{orgId}/usage` |
 | Codex usage | `https://chatgpt.com/backend-api/wham/usage` |
-| Codex OAuth refresh | `https://auth.openai.com/oauth/token` |
 | Cursor weekly allowance | `https://api2.cursor.sh/aiserver.v1.DashboardService/GetSandUsageStatus` |
 | Kimi Code usage | `https://api.kimi.com/coding/v1/usages` |
 | Kimi Code OAuth refresh | `https://auth.kimi.com/api/oauth/token` |

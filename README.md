@@ -250,7 +250,7 @@ Kimi Code credentials ───┘
 
 The app refreshes the provider on screen every two minutes by default, or every five minutes in Low Power Mode. Enabled providers that are not on screen refresh five times less often, and as soon as they are shown or the menu opens; new sign-ins are picked up at that slower pace or when you click **Refresh**. Hidden providers stop polling and refresh when re-enabled. No connection stays open between refreshes. Background requests and automatic provider rotation pause while the display or Mac sleeps; stale usage refreshes on wake. Failed providers retry less frequently, respect server cooldowns, and keep the last successful reading. **Last Updates** in the menu shows how fresh each provider's data is.
 
-Credential discovery runs off the UI thread. Menu-bar rendering uses cached availability and reuses unchanged images; menus update when opened. OAuth access tokens are refreshed when supported by the provider session. See [Architecture](docs/ARCHITECTURE.md) for component boundaries, credential priority, and network destinations.
+Credential discovery runs off the UI thread. Menu-bar rendering uses cached availability and reuses unchanged images; menus update when opened. Usagebar never refreshes Claude Code's or Codex's sign-in, so it can't sign you out of either; an expired one waits for that tool to renew it. See [Architecture](docs/ARCHITECTURE.md) for component boundaries, credential priority, and network destinations.
 
 ## Privacy and security
 

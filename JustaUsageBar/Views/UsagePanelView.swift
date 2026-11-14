@@ -78,15 +78,14 @@ struct UsagePanelView: View {
         .padding(10)
         .frame(width: 340)
         .font(.system(size: 13))
+        // Solid, like the Connections window, instead of the blurred desktop.
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private var header: some View {
         HStack(spacing: 8) {
             HStack(spacing: 6) {
-                // The plain icon, without the tile macOS puts app icons on.
-                Image("PanelIcon")
-                    .resizable()
-                    .interpolation(.high)
+                UsagebarMark()
                     .frame(width: 20, height: 20)
                 Text("Usagebar").fontWeight(.semibold)
             }
@@ -142,7 +141,6 @@ private struct UsagePanelCardView: View {
     let card: UsagePanelCard
     let isInMenuBar: Bool
     @ObservedObject var model: UsagePanelModel
-    @Environment(\.colorScheme) private var colorScheme
     @State private var hovering = false
 
     var body: some View {
@@ -224,17 +222,13 @@ private struct UsagePanelCardView: View {
         card.provider == .claude ? Color(nsColor: .usagebarClaudeOrange) : .primary
     }
 
+    /// The same tint and border as the rows of the Connections window.
     private var cardFill: Color {
-        switch (colorScheme, hovering) {
-        case (.dark, false): Color.white.opacity(0.05)
-        case (.dark, true): Color.white.opacity(0.09)
-        case (_, false): Color.white.opacity(0.66)
-        case (_, true): Color.white.opacity(0.92)
-        }
+        Color.primary.opacity(hovering ? 0.07 : 0.04)
     }
 
     private var stroke: Color {
-        colorScheme == .dark ? Color.white.opacity(0.07) : Color.black.opacity(0.07)
+        Color.primary.opacity(0.07)
     }
 }
 
@@ -322,6 +316,24 @@ private struct UsageMeter: View {
         }
         .frame(height: 6)
         .animation(.easeOut(duration: 0.4), value: percent)
+    }
+}
+
+/// Usagebar's mark, a bar with its first segment filled, drawn with a heavier
+/// line than the app icon so it holds up at header size.
+private struct UsagebarMark: View {
+    var body: some View {
+        ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 2.5, style: .continuous)
+                .strokeBorder(Color.primary, lineWidth: 1.8)
+            RoundedRectangle(cornerRadius: 1, style: .continuous)
+                .fill(Color.primary)
+                .frame(width: 3.2)
+                .padding(.vertical, 3)
+                .padding(.leading, 3)
+        }
+        .frame(width: 19, height: 9)
+        .accessibilityHidden(true)
     }
 }
 
@@ -432,23 +444,16 @@ final class UsagePanel: NSPanel {
         container.layer?.cornerCurve = .continuous
         container.layer?.masksToBounds = true
 
-        let effect = NSVisualEffectView()
-        effect.material = .popover
-        effect.state = .active
-        effect.blendingMode = .behindWindow
-        // The content is a sibling above the blur, not inside it, so text
-        // keeps its solid colors instead of turning vibrant (lighter).
+        // The SwiftUI view paints its own solid background.
         let hosting = NSHostingView(rootView: rootView)
-        for view in [effect, hosting] as [NSView] {
-            view.translatesAutoresizingMaskIntoConstraints = false
-            container.addSubview(view)
-            NSLayoutConstraint.activate([
-                view.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-                view.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-                view.topAnchor.constraint(equalTo: container.topAnchor),
-                view.bottomAnchor.constraint(equalTo: container.bottomAnchor)
-            ])
-        }
+        hosting.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(hosting)
+        NSLayoutConstraint.activate([
+            hosting.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            hosting.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            hosting.topAnchor.constraint(equalTo: container.topAnchor),
+            hosting.bottomAnchor.constraint(equalTo: container.bottomAnchor)
+        ])
         contentView = container
     }
 

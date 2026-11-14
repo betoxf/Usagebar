@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.14.3](https://github.com/betoxf/Usagebar/releases/tag/v1.14.3) — 2026-11-14
+
+- Give the panel a solid background and cards that match the Connections window, instead of the blurred desktop behind it.
+- Draw the Usagebar mark in the panel's header with a bolder line, so it holds up in light and dark.
+
 ## [1.14.2](https://github.com/betoxf/Usagebar/releases/tag/v1.14.2) — 2026-11-14
 
 - Never sign you out of Claude Code or Codex. Usagebar used to refresh their sign-ins with their own refresh tokens and keep the new ones to itself, which left the CLI holding a token that no longer worked. Now it only reads what Claude Code and Codex saved. When a sign-in has expired, the card keeps your last reading and says to open Claude Code or Codex, and picks up the renewed sign-in on its own.

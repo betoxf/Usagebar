@@ -680,7 +680,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private func updatePanel() {
         guard isPanelOpen else { return }
         panelModel.needsSetup = !viewModel.hasCredentials
-        panelModel.cards = panelCards()
+        let cards = panelCards()
+        panelModel.cards = cards
+        panelModel.offlineNotice = cards.contains { isOffline($0.provider) }
+            ? UsagePanelNotice(
+                title: "No internet connection",
+                note: "Showing the last readings. Usagebar refreshes when you're back online."
+            )
+            : nil
         panelModel.currentProvider = viewModel.hasCredentials ? currentProvider : nil
         panelModel.updateVersion = availableUpdateVersion
         panelModel.isRefreshing = viewModel.isLoading
@@ -720,6 +727,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             actionTitle: "Sign In Again",
             actionDetail: command
         )
+    }
+
+    /// A "Not connected" card keeps its own message even while offline.
+    private func isOffline(_ provider: DisplayProvider) -> Bool {
+        viewModel.offlineProviders.contains(provider) && hasCredentials(for: provider)
     }
 
     private func panelCards() -> [UsagePanelCard] {
@@ -866,7 +878,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             ))
         }
 
-        return cards
+        // One notice above the cards says the Mac is offline, so the cards
+        // don't each repeat it.
+        return cards.map { card in
+            guard isOffline(card.provider) else { return card }
+            var card = card
+            card.message = nil
+            card.note = nil
+            card.actionTitle = nil
+            card.actionDetail = nil
+            return card
+        }
     }
 
     private func configurePanelActions() {
@@ -921,36 +943,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 
     @objc private func statusBarButtonClicked() {
-        let event = NSApp.currentEvent
+        statusBarClicked(isRightClick: NSApp.currentEvent?.type == .rightMouseUp)
+    }
 
-        // Right click shows the usage panel
-        if event?.type == .rightMouseUp {
+    private func statusBarClicked(isRightClick: Bool) {
+        // With nothing to show yet, a left click opens setup; a right click
+        // still opens the panel, so Quit stays in reach.
+        if !viewModel.hasCredentials {
+            if isRightClick { togglePanel() } else { showSetupWindow() }
+            return
+        }
+
+        // Left click shows the usage panel
+        if !isRightClick {
             togglePanel()
             return
         }
 
-        // With nothing to show yet, the bar's only job is setup.
-        if !viewModel.hasCredentials {
-            showSetupWindow()
+        // Right click cycles to the next provider when more than one is shown
+        guard displayableProviders().count > 1, let next = providerAfter(currentProvider) else {
+            togglePanel()
             return
         }
-
-        // Left click cycles to the next provider when more than one is shown
-        if event?.type == .leftMouseUp {
-            if displayableProviders().count > 1, let next = providerAfter(currentProvider) {
-                // A manual click always wins, even while focus-follow has the
-                // bar locked to the frontmost app's provider. Suspend the lock
-                // for now; the next app switch (including switching back to
-                // Claude/Cursor/etc.) re-applies focus-follow.
-                focusProvider = nil
-                isManualPick = true
-                setCurrentProvider(next)
-                restartProviderAnimation()
-            } else {
-                // If only one provider, show the usage panel
-                togglePanel()
-            }
-        }
+        // A manual click always wins, even while focus-follow has the
+        // bar locked to the frontmost app's provider. Suspend the lock
+        // for now; the next app switch (including switching back to
+        // Claude/Cursor/etc.) re-applies focus-follow.
+        focusProvider = nil
+        isManualPick = true
+        setCurrentProvider(next)
+        restartProviderAnimation()
     }
 
     private func showSetupOnFirstLaunch() {

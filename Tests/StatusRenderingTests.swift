@@ -14,6 +14,10 @@ extension UsageViewModel {
     fileprivate func useSignInFixture(_ providers: Set<DisplayProvider>) {
         needsSignIn = providers
     }
+
+    fileprivate func useOfflineFixture(_ providers: Set<DisplayProvider>) {
+        offlineProviders = providers
+    }
 }
 
 extension AppDelegate {
@@ -57,7 +61,7 @@ extension AppDelegate {
         precondition(ProviderSignIn.terminal(executable: "/a b/it's", arguments: ["login"]).command == "'/a b/it'\\''s' 'login'",
                      "Login command was not quoted for the shell")
         verifySetupModel()
-        statusBarButtonClicked()
+        statusBarClicked(isRightClick: false)
         precondition(setupWindow?.isVisible == true, "A click with nothing connected did not open setup")
         setupWindow?.close()
         precondition(setupWindow == nil, "Closing setup left it watching for sign-ins")
@@ -490,6 +494,42 @@ extension AppDelegate {
 
         viewModel.useSignInFixture([])
         viewModel.codexError = nil
+
+        // Offline: one notice above the cards instead of an error on each.
+        viewModel.useOfflineFixture([.claude, .codex])
+        viewModel.claudeError = "The Internet connection appears to be offline."
+        viewModel.codexError = "The Internet connection appears to be offline."
+        updatePanel()
+        precondition(panelModel.offlineNotice?.title == "No internet connection", "Offline showed no notice")
+        precondition(panelModel.cards.allSatisfy { $0.message == nil && $0.actionTitle == nil },
+                     "Each card repeated the offline error")
+        for (name, appearance) in [("panel-offline-light", NSAppearance.Name.aqua), ("panel-offline-dark", .darkAqua)] {
+            let view = NSHostingView(rootView: UsagePanelView(model: panelModel))
+            view.appearance = NSAppearance(named: appearance)
+            view.frame = NSRect(origin: .zero, size: view.fittingSize)
+            view.layoutSubtreeIfNeeded()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+            guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
+            view.cacheDisplay(in: view.bounds, to: bitmap)
+            let url = output.deletingPathExtension().appendingPathExtension("\(name).png")
+            try bitmap.representation(using: .png, properties: [:])?.write(to: url)
+        }
+        viewModel.useOfflineFixture([])
+        viewModel.claudeError = nil
+        viewModel.codexError = nil
+        updatePanel()
+        precondition(panelModel.offlineNotice == nil, "The offline notice outlived the outage")
+        isPanelOpen = false
+
+        // A left click opens the panel; a right click switches providers.
+        let shown = currentProvider
+        statusBarClicked(isRightClick: true)
+        precondition(currentProvider != shown, "A right click didn't switch providers")
+        precondition(!panel.isVisible, "A right click opened the panel")
+        statusBarClicked(isRightClick: false)
+        precondition(panel.isVisible, "A left click didn't open the panel")
+        statusBarClicked(isRightClick: false)
+        precondition(!panel.isVisible, "A second left click didn't close the panel")
         isPanelOpen = false
     }
 }

@@ -35,10 +35,17 @@ struct UsagePanelCard: Identifiable {
     var id: DisplayProvider { provider }
 }
 
+/// A line above the cards about every provider at once, e.g. being offline.
+struct UsagePanelNotice: Equatable {
+    let title: String
+    let note: String
+}
+
 /// What the panel shows. `AppDelegate` fills it from the normalized usage
 /// models and handles the actions.
 final class UsagePanelModel: ObservableObject {
     @Published var cards: [UsagePanelCard] = []
+    @Published var offlineNotice: UsagePanelNotice?
     @Published var currentProvider: DisplayProvider?
     @Published var updatedText = ""
     @Published var updateVersion: String?
@@ -68,6 +75,9 @@ struct UsagePanelView: View {
                 setup
             } else {
                 VStack(spacing: 6) {
+                    if let notice = model.offlineNotice {
+                        offline(notice)
+                    }
                     ForEach(model.cards) { card in
                         UsagePanelCardView(
                             card: card,
@@ -103,6 +113,29 @@ struct UsagePanelView: View {
         }
         .padding(.horizontal, 4)
         .padding(.vertical, 2)
+    }
+
+    private func offline(_ notice: UsagePanelNotice) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: "wifi.slash")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Color(nsColor: .systemOrange))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(notice.title)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Color(nsColor: .systemOrange))
+                Text(notice.note)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(EdgeInsets(top: 9, leading: 12, bottom: 10, trailing: 12))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color(nsColor: .systemOrange).opacity(0.1))
+        )
     }
 
     private var setup: some View {

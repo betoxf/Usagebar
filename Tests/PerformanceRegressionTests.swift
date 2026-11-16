@@ -16,6 +16,7 @@ struct PerformanceRegressionTests {
         try await testViewModel()
         try await testRejectedKeys()
         try await testExpiredSignIn()
+        try await testOffline()
         testTerminalCommands()
         try await testTerminalSessionScan()
         await testProviderHTTP()
@@ -210,6 +211,45 @@ struct PerformanceRegressionTests {
         check(after[.claude] == (before[.claude] ?? 0) + 1, "A renewed sign-in waited out the failure delay")
         check(after[.codex] == before[.codex], "Picking up a sign-in refetched other providers")
         check(model.needsSignIn.isEmpty, "A renewed sign-in kept asking to sign in")
+    }
+
+    @MainActor static func testOffline() async throws {
+        await FakeProviders.reset()
+        await FakeProviders.setAvailable([.claude, .codex])
+        await FakeProviders.setError(.networkError(URLError(.notConnectedToInternet)), for: .claude)
+        await FakeProviders.setError(.networkError(URLError(.cannotFindHost)), for: .codex)
+        let model = UsageViewModel(startAutomatically: false)
+        defer { model.stopAutoRefresh() }
+        model.showClaude = true
+        model.showCodex = true
+        model.showCursor = false
+        model.showKimi = false
+        model.showZai = false
+        await model.refresh()
+        check(model.offlineProviders == [.claude, .codex], "Requests that couldn't reach the internet weren't marked offline")
+        check(!UsageViewModel.isConnectionError(APIError.unauthorized), "A rejected sign-in counted as offline")
+
+        // A path that drops again before the delay ends retries nothing.
+        model.reconnectDelay = 0.1
+        await FakeProviders.clearError(for: .claude)
+        await FakeProviders.clearError(for: .codex)
+        let before = await FakeProviders.counts
+        model.networkPathChanged(satisfied: true)
+        model.networkPathChanged(satisfied: false)
+        try await Task.sleep(nanoseconds: 250_000_000)
+        check(await FakeProviders.counts == before, "Retried on a path that dropped again")
+
+        // Back online: a burst of reports retries both once, without their backoff.
+        model.networkPathChanged(satisfied: true)
+        model.networkPathChanged(satisfied: true)
+        model.networkPathChanged(satisfied: true)
+        try await eventually { !model.isLoading && model.offlineProviders.isEmpty }
+        try await Task.sleep(nanoseconds: 250_000_000)
+        let after = await FakeProviders.counts
+        check(after[.claude] == (before[.claude] ?? 0) + 1 && after[.codex] == (before[.codex] ?? 0) + 1,
+              "Coming back online didn't refresh each offline provider once")
+        check(model.claudeError == nil && model.codexError == nil, "Errors stayed after reconnecting")
+        await FakeProviders.setAvailable([.claude, .codex, .kimi])
     }
 
     @MainActor static func testRejectedKeys() async throws {

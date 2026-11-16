@@ -7,6 +7,7 @@ import Foundation
 import Combine
 import SwiftUI
 import ServiceManagement
+import Network
 
 @MainActor
 final class UsageViewModel: ObservableObject {
@@ -22,6 +23,15 @@ final class UsageViewModel: ObservableObject {
 
     @Published var codexUsageData: CodexUsageData = .placeholder
     @Published var codexError: String?
+
+    /// CLIs whose own sign-in has expired; only that CLI's login can renew it.
+    @Published private(set) var needsSignIn: Set<DisplayProvider> = []
+
+    /// Providers whose last request couldn't reach the internet. While any are
+    /// listed, a path monitor waits for the network to come back.
+    @Published private(set) var offlineProviders: Set<DisplayProvider> = [] {
+        didSet { if offlineProviders.isEmpty { stopWatchingNetwork() } }
+    }
 
     // MARK: - Cursor Published Properties
 
@@ -121,10 +131,16 @@ final class UsageViewModel: ObservableObject {
     private var isRotating = false
     private var lastCredentialCheck: Date?
     private var isCheckingSignIns = false
+    private let observesSystem: Bool
+    private var pathMonitor: NWPathMonitor?
+    private var reconnectRetry: Task<Void, Never>?
+    /// Path reports arrive in bursts, and DNS can lag the first one.
+    var reconnectDelay: TimeInterval = 3
 
     @AppStorage("hasLaunchedBefore") private var hasLaunchedBefore = false
 
     init(startAutomatically: Bool = true) {
+        observesSystem = startAutomatically
         if let raw = UserDefaults.standard.string(forKey: "preferredDisplayProvider"),
            let provider = DisplayProvider(rawValue: raw) {
             displayedProvider = provider
@@ -227,6 +243,75 @@ final class UsageViewModel: ObservableObject {
     func refresh() async {
         if let credentialChangeTask { await credentialChangeTask.value }
         await requestRefresh(manual: true)
+    }
+
+    /// Picks up a CLI sign-in renewed outside Usagebar. Drops the failure delay
+    /// for this provider alone, keeps any server cooldown, and rereads its CLI's
+    /// credentials. An expired Claude token is checked locally, with no request.
+    func retryAfterSignIn(_ provider: DisplayProvider) async {
+        switch provider {
+        case .claude: await ClaudeOAuthService.shared.clearCache()
+        case .codex: await CodexAPIService.shared.clearCache()
+        default: break
+        }
+        await retryNow([provider])
+    }
+
+    /// Skips the failure backoff, but not a server's Retry-After.
+    private func retryNow(_ providers: Set<DisplayProvider>) async {
+        for provider in providers {
+            refreshStates[provider, default: .init()].lastAttempt = nil
+            refreshStates[provider, default: .init()].retryAt = refreshStates[provider]?.serverRetryAt
+        }
+        await requestRefresh()
+    }
+
+    /// Requests that fail because the Mac is offline. Anything else, such as a
+    /// slow server, still shows as that provider's own error.
+    nonisolated static func isConnectionError(_ error: Error) -> Bool {
+        if case APIError.networkError(let underlying) = error { return isConnectionError(underlying) }
+        guard let code = (error as? URLError)?.code else { return false }
+        return [.notConnectedToInternet, .networkConnectionLost, .cannotFindHost, .dnsLookupFailed,
+                .dataNotAllowed, .internationalRoamingOff].contains(code)
+    }
+
+    /// Starts once a request finds the Mac offline and stops when every provider
+    /// is reachable again, so nothing watches the network while all is well.
+    private func watchNetwork() {
+        guard observesSystem, pathMonitor == nil else { return }
+        let monitor = NWPathMonitor()
+        monitor.pathUpdateHandler = { [weak self] path in
+            let satisfied = path.status == .satisfied
+            MainActor.assumeIsolated { self?.networkPathChanged(satisfied: satisfied) }
+        }
+        pathMonitor = monitor
+        monitor.start(queue: .main)
+    }
+
+    private func stopWatchingNetwork() {
+        pathMonitor?.cancel()
+        pathMonitor = nil
+        reconnectRetry?.cancel()
+        reconnectRetry = nil
+    }
+
+    /// Once the path stays usable for `reconnectDelay`, the offline providers
+    /// retry together, once, however many reports arrived meanwhile. The
+    /// monitor's first report counts too, in case the network is already back.
+    func networkPathChanged(satisfied: Bool) {
+        reconnectRetry?.cancel()
+        reconnectRetry = nil
+        guard satisfied else { return }
+        let delay = UInt64(reconnectDelay * 1_000_000_000)
+        reconnectRetry = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: delay)
+            guard !Task.isCancelled, let self else { return }
+            self.reconnectRetry = nil
+            // A provider disconnected while offline is never polled again.
+            let providers = self.offlineProviders.intersection(self.refreshTargets)
+            guard !providers.isEmpty else { self.offlineProviders = []; return }
+            await self.retryNow(providers)
+        }
     }
 
     func rediscoverCredentialsAndRefresh() async {
@@ -390,6 +475,8 @@ final class UsageViewModel: ObservableObject {
                 qwenUsageData = data
             }
             setError(nil, for: provider)
+            needsSignIn.remove(provider)
+            offlineProviders.remove(provider)
             refreshStates[provider, default: .init()].succeeded(at: Date())
         } catch {
             if Task.isCancelled || isRequestCancelled(error) {
@@ -401,6 +488,17 @@ final class UsageViewModel: ObservableObject {
             refreshStates[provider, default: .init()].failed(
                 at: Date(), interval: effectiveRefreshInterval, serverRetryAt: retryAfter
             )
+            switch error {
+            case APIError.cliSignInExpired: needsSignIn.insert(provider)
+            case APIError.unauthorized where provider == .claude: needsSignIn.insert(provider)
+            default: needsSignIn.remove(provider)
+            }
+            if Self.isConnectionError(error) {
+                offlineProviders.insert(provider)
+                watchNetwork()
+            } else {
+                offlineProviders.remove(provider)
+            }
             if provider == .claude, case APIError.unauthorized = error {
                 setError("Signed out — run `claude` in Terminal to log in", for: provider)
             } else if provider == .deepseek, case APIError.unauthorized = error {
@@ -451,6 +549,7 @@ final class UsageViewModel: ObservableObject {
         timer?.invalidate()
         timer = nil
         refreshTask?.cancel()
+        stopWatchingNetwork()
     }
 
     func updateRefreshInterval(_ interval: TimeInterval) {
@@ -563,6 +662,7 @@ final class UsageViewModel: ObservableObject {
         }, reset: {
             self.usageData = .placeholder
             self.claudeError = nil
+            self.needsSignIn.remove(.claude)
             self.refreshStates[.claude] = nil
         })
     }
@@ -571,6 +671,7 @@ final class UsageViewModel: ObservableObject {
         changeCredentials({ CodexAPIService.shared.clearCache() }, reset: {
             self.codexUsageData = .placeholder
             self.codexError = nil
+            self.needsSignIn.remove(.codex)
             self.refreshStates[.codex] = nil
         })
     }
@@ -646,6 +747,7 @@ final class UsageViewModel: ObservableObject {
     /// Stops using a tool and forgets anything Usagebar saved for it.
     func disconnect(_ provider: DisplayProvider) {
         disconnectedProviders.insert(provider)
+        offlineProviders.remove(provider)
         switch provider {
         case .claude: clearClaudeCredentials()
         case .codex: clearCodexCredentials()

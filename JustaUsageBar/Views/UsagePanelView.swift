@@ -26,15 +26,26 @@ struct UsagePanelCard: Identifiable {
     let rows: [UsagePanelRow]
     /// An error or "Not connected", shown under the rows.
     var message: String?
+    /// A quieter line under the message, e.g. what the card shows meanwhile.
+    var note: String?
     /// A button under the message, e.g. "Connect Claude".
     var actionTitle: String?
+    /// The command the action runs, shown beside its button.
+    var actionDetail: String?
     var id: DisplayProvider { provider }
+}
+
+/// A line above the cards about every provider at once, e.g. being offline.
+struct UsagePanelNotice: Equatable {
+    let title: String
+    let note: String
 }
 
 /// What the panel shows. `AppDelegate` fills it from the normalized usage
 /// models and handles the actions.
 final class UsagePanelModel: ObservableObject {
     @Published var cards: [UsagePanelCard] = []
+    @Published var offlineNotice: UsagePanelNotice?
     @Published var currentProvider: DisplayProvider?
     @Published var updatedText = ""
     @Published var updateVersion: String?
@@ -64,6 +75,9 @@ struct UsagePanelView: View {
                 setup
             } else {
                 VStack(spacing: 6) {
+                    if let notice = model.offlineNotice {
+                        offline(notice)
+                    }
                     ForEach(model.cards) { card in
                         UsagePanelCardView(
                             card: card,
@@ -99,6 +113,29 @@ struct UsagePanelView: View {
         }
         .padding(.horizontal, 4)
         .padding(.vertical, 2)
+    }
+
+    private func offline(_ notice: UsagePanelNotice) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: "wifi.slash")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Color(nsColor: .systemOrange))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(notice.title)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(Color(nsColor: .systemOrange))
+                Text(notice.note)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(EdgeInsets(top: 9, leading: 12, bottom: 10, trailing: 12))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color(nsColor: .systemOrange).opacity(0.1))
+        )
     }
 
     private var setup: some View {
@@ -190,16 +227,37 @@ private struct UsagePanelCardView: View {
             }
 
             if let message = card.message {
-                // "Not connected" has no rows and isn't an error.
-                Text(message)
-                    .font(.system(size: 12))
-                    .foregroundStyle(card.rows.isEmpty ? Color.secondary : Color(nsColor: .systemOrange))
-                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 2) {
+                    // "Not connected" has no rows and isn't an error.
+                    Text(message)
+                        .font(.system(size: 12, weight: card.note == nil ? .regular : .medium))
+                        .foregroundStyle(card.rows.isEmpty ? Color.secondary : Color(nsColor: .systemOrange))
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let note = card.note {
+                        Text(note)
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
             }
             if let actionTitle = card.actionTitle {
-                Button(actionTitle) { model.onAction(card.provider) }
-                    .buttonStyle(.link)
-                    .font(.system(size: 12))
+                if let detail = card.actionDetail {
+                    HStack(spacing: 8) {
+                        Button(actionTitle) { model.onAction(card.provider) }
+                            .controlSize(.small)
+                        Text(detail)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                    .padding(.top, 2)
+                    .help("Runs \(detail) in Terminal. Usagebar refreshes when it finishes.")
+                } else {
+                    Button(actionTitle) { model.onAction(card.provider) }
+                        .buttonStyle(.link)
+                        .font(.system(size: 12))
+                }
             }
         }
         .padding(EdgeInsets(top: 10, leading: 12, bottom: 11, trailing: 12))

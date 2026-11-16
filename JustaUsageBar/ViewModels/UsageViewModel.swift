@@ -23,6 +23,9 @@ final class UsageViewModel: ObservableObject {
     @Published var codexUsageData: CodexUsageData = .placeholder
     @Published var codexError: String?
 
+    /// CLIs whose own sign-in has expired; only that CLI's login can renew it.
+    @Published private(set) var needsSignIn: Set<DisplayProvider> = []
+
     // MARK: - Cursor Published Properties
 
     @Published var cursorUsageData: CursorUsageData = .placeholder
@@ -229,6 +232,20 @@ final class UsageViewModel: ObservableObject {
         await requestRefresh(manual: true)
     }
 
+    /// Picks up a CLI sign-in renewed outside Usagebar. Drops the failure delay
+    /// for this provider alone, keeps any server cooldown, and rereads its CLI's
+    /// credentials. An expired Claude token is checked locally, with no request.
+    func retryAfterSignIn(_ provider: DisplayProvider) async {
+        switch provider {
+        case .claude: await ClaudeOAuthService.shared.clearCache()
+        case .codex: await CodexAPIService.shared.clearCache()
+        default: break
+        }
+        refreshStates[provider, default: .init()].lastAttempt = nil
+        refreshStates[provider, default: .init()].retryAt = refreshStates[provider]?.serverRetryAt
+        await requestRefresh()
+    }
+
     func rediscoverCredentialsAndRefresh() async {
         if let credentialChangeTask { await credentialChangeTask.value }
         await requestRefresh(manual: true, rediscover: true)
@@ -390,6 +407,7 @@ final class UsageViewModel: ObservableObject {
                 qwenUsageData = data
             }
             setError(nil, for: provider)
+            needsSignIn.remove(provider)
             refreshStates[provider, default: .init()].succeeded(at: Date())
         } catch {
             if Task.isCancelled || isRequestCancelled(error) {
@@ -401,6 +419,11 @@ final class UsageViewModel: ObservableObject {
             refreshStates[provider, default: .init()].failed(
                 at: Date(), interval: effectiveRefreshInterval, serverRetryAt: retryAfter
             )
+            switch error {
+            case APIError.cliSignInExpired: needsSignIn.insert(provider)
+            case APIError.unauthorized where provider == .claude: needsSignIn.insert(provider)
+            default: needsSignIn.remove(provider)
+            }
             if provider == .claude, case APIError.unauthorized = error {
                 setError("Signed out — run `claude` in Terminal to log in", for: provider)
             } else if provider == .deepseek, case APIError.unauthorized = error {
@@ -563,6 +586,7 @@ final class UsageViewModel: ObservableObject {
         }, reset: {
             self.usageData = .placeholder
             self.claudeError = nil
+            self.needsSignIn.remove(.claude)
             self.refreshStates[.claude] = nil
         })
     }
@@ -571,6 +595,7 @@ final class UsageViewModel: ObservableObject {
         changeCredentials({ CodexAPIService.shared.clearCache() }, reset: {
             self.codexUsageData = .placeholder
             self.codexError = nil
+            self.needsSignIn.remove(.codex)
             self.refreshStates[.codex] = nil
         })
     }

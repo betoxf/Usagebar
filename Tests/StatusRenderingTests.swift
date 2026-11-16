@@ -10,6 +10,10 @@ extension UsageViewModel {
             refreshStates[provider, default: .init()].succeeded(at: Date())
         }
     }
+
+    fileprivate func useSignInFixture(_ providers: Set<DisplayProvider>) {
+        needsSignIn = providers
+    }
 }
 
 extension AppDelegate {
@@ -425,6 +429,67 @@ extension AppDelegate {
             let url = output.deletingPathExtension().appendingPathExtension("\(name).png")
             try bitmap.representation(using: .png, properties: [:])?.write(to: url)
         }
+
+        // Claude Code's sign-in expired: the card says so and offers its login.
+        viewModel.useSignInFixture([.claude])
+        viewModel.claudeError = APIError.cliSignInExpired(tool: "Claude Code").errorDescription
+        updatePanel()
+        let claudeCard = panelModel.cards.first { $0.provider == .claude }
+        precondition(claudeCard?.actionTitle == "Sign In Again", "An expired Claude sign-in had no button")
+        precondition(claudeCard?.actionDetail == "claude auth login", "The Claude login command drifted")
+        for (name, appearance) in [("panel-signin-light", NSAppearance.Name.aqua), ("panel-signin-dark", .darkAqua)] {
+            let view = NSHostingView(rootView: UsagePanelView(model: panelModel))
+            view.appearance = NSAppearance(named: appearance)
+            view.frame = NSRect(origin: .zero, size: view.fittingSize)
+            view.layoutSubtreeIfNeeded()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+            guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
+            view.cacheDisplay(in: view.bounds, to: bitmap)
+            let url = output.deletingPathExtension().appendingPathExtension("\(name).png")
+            try bitmap.representation(using: .png, properties: [:])?.write(to: url)
+        }
+
+        // Sign In Again waits for the login script to delete itself, then retries.
+        let script = FileManager.default.temporaryDirectory
+            .appendingPathComponent("usagebar-signin-\(UUID().uuidString).command")
+        try Data().write(to: script)
+        watchSignIn(.claude, script: script)
+        let waiting = panelModel.cards.first { $0.provider == .claude }
+        precondition(signInWatches[.claude] != nil, "Sign In Again started no watch")
+        precondition(waiting?.note?.hasPrefix("Finish in Terminal") == true, "The card hid the running login")
+        precondition(waiting?.actionTitle == "Sign In Again", "A running login left no way to start again")
+        for (name, appearance) in [("panel-signin-waiting-light", NSAppearance.Name.aqua)] {
+            let view = NSHostingView(rootView: UsagePanelView(model: panelModel))
+            view.appearance = NSAppearance(named: appearance)
+            view.frame = NSRect(origin: .zero, size: view.fittingSize)
+            view.layoutSubtreeIfNeeded()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+            guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
+            view.cacheDisplay(in: view.bounds, to: bitmap)
+            let url = output.deletingPathExtension().appendingPathExtension("\(name).png")
+            try bitmap.representation(using: .png, properties: [:])?.write(to: url)
+        }
+        try FileManager.default.removeItem(at: script)
+        let deadline = Date().addingTimeInterval(2)
+        while signInWatches[.claude] != nil, Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+        }
+        precondition(signInWatches[.claude] == nil, "The finished login was never noticed")
+        let after = panelModel.cards.first { $0.provider == .claude }
+        precondition(after?.note?.hasPrefix("Showing the last reading") == true, "The card kept waiting after the login")
+
+        // Codex gets the same card with its own login.
+        viewModel.useSignInFixture([.codex])
+        viewModel.claudeError = nil
+        viewModel.codexError = APIError.cliSignInExpired(tool: "Codex").errorDescription
+        updatePanel()
+        let codexCard = panelModel.cards.first { $0.provider == .codex }
+        precondition(codexCard?.message == "Codex sign-in expired", "An expired Codex sign-in read wrong")
+        precondition(codexCard?.actionDetail == "codex login", "The Codex login command drifted")
+        precondition(panelModel.cards.first { $0.provider == .claude }?.actionTitle == nil, "Claude kept a stale button")
+
+        viewModel.useSignInFixture([])
+        viewModel.codexError = nil
         isPanelOpen = false
     }
 }

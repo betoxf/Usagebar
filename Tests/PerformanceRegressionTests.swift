@@ -15,6 +15,7 @@ struct PerformanceRegressionTests {
         testTimerLifetime()
         try await testViewModel()
         try await testRejectedKeys()
+        try await testExpiredSignIn()
         testTerminalCommands()
         try await testTerminalSessionScan()
         await testProviderHTTP()
@@ -186,6 +187,29 @@ struct PerformanceRegressionTests {
         model.showCodex = false
         model.showKimi = false
         check(model.refreshTargets == [.claude], "All-hidden fallback disappeared")
+    }
+
+    @MainActor static func testExpiredSignIn() async throws {
+        await FakeProviders.reset()
+        await FakeProviders.setError(.cliSignInExpired(tool: "Claude Code"), for: .claude)
+        let model = UsageViewModel(startAutomatically: false)
+        defer { model.stopAutoRefresh() }
+        model.showClaude = true
+        model.showCodex = true
+        model.showCursor = false
+        model.showKimi = false
+        model.showZai = false
+        await model.refresh()
+        check(model.needsSignIn == [.claude], "An expired CLI sign-in didn't ask to sign in again")
+        // Once Claude Code renews it, a retry skips the failure delay for Claude alone.
+        await FakeProviders.clearError(for: .claude)
+        let before = await FakeProviders.counts
+        await model.retryAfterSignIn(.claude)
+        try await eventually { !model.isLoading && model.claudeError == nil }
+        let after = await FakeProviders.counts
+        check(after[.claude] == (before[.claude] ?? 0) + 1, "A renewed sign-in waited out the failure delay")
+        check(after[.codex] == before[.codex], "Picking up a sign-in refetched other providers")
+        check(model.needsSignIn.isEmpty, "A renewed sign-in kept asking to sign in")
     }
 
     @MainActor static func testRejectedKeys() async throws {

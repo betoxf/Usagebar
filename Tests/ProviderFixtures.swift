@@ -24,6 +24,7 @@ import Foundation
     static func setAvailable(_ value: Set<DisplayProvider>) { available = value }
     static func setDelay(_ value: UInt64) { delay = value }
     static func setError(_ value: APIError, for provider: DisplayProvider) { failures[provider] = value }
+    static func clearError(for provider: DisplayProvider) { failures[provider] = nil }
     static func fetch(_ provider: DisplayProvider) async throws -> Int {
         counts[provider, default: 0] += 1
         let result = counts[provider]!
@@ -44,6 +45,7 @@ nonisolated enum ClaudeAuthSource { case none, oauth, webSession }
 nonisolated enum KimiAuthSource { case none, cli }
 nonisolated enum APIError: Error {
     case unauthorized
+    case cliSignInExpired(tool: String)
     case rateLimited(retryAfter: Date?)
     var retryAfter: Date? { if case .rateLimited(let date) = self { return date }; return nil }
     var errorDescription: String? { "Test provider error" }

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Usagebar</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main id="panel">
+      <header class="bar">
+        <span class="title"><img class="app-icon" src="app-icon.png" alt="" />Usagebar</span>
+        <span id="updated" class="muted"></span>
+        <button id="refresh" class="icon-button" title="Refresh" aria-label="Refresh">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 8a5.5 5.5 0 1 1-1.61-3.89M13.5 2.5v3h-3" /></svg>
+        </button>
+      </header>
+      <section id="providers"></section>
+      <footer class="bar">
+        <span class="muted">Click a provider to show it in the tray</span>
+        <button id="quit" class="text-button">Quit</button>
+      </footer>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>

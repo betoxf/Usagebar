@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The flyout listens for usage updates and calls the app's commands.",
+  "windows": ["flyout"],
+  "permissions": ["core:default", "core:window:allow-hide"]
+}

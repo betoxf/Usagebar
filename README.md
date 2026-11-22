@@ -119,7 +119,7 @@ Download `Usagebar.zip` from the [latest release](https://github.com/betoxf/Usag
 1. Install and launch Usagebar.
 2. If you already use the provider CLIs, Usagebar discovers their local credentials automatically.
 3. Otherwise the setup window opens. Click **Sign In** next to each tool you use and it shows **Connected** on its own when you finish. To open it again, click **Usagebar Setup** in the menu bar, or choose **Connections…** under the panel's **⋯** button. Click **Connected** on a row to disconnect that tool.
-4. Click the menu-bar item to open the usage panel. Right-click switches providers. Settings are under the panel's **⋯** button.
+4. Click or right-click the menu-bar item to open the usage panel, and click a provider there to show it in the bar. Settings are under the panel's **⋯** button.
 
 ### Connect your tools
 
@@ -166,7 +166,7 @@ Click the status item to open the usage panel; its **⋯** button holds these se
 | Refresh (`⌘R`) | Rediscover credentials and fetch enabled providers, subject to server retry deadlines. |
 | Display mode | Show both windows, the five-hour window only, or the weekly window only. |
 | Provider visibility | Choose which detected providers appear, rotate, and refresh in the background. |
-| Switch cadence | Rotate providers automatically or switch manually with a right click. |
+| Switch cadence | Rotate providers automatically, or pick one in the panel (Manual). |
 | Launch at Login | Register or remove Usagebar as a macOS login item. |
 | Sign out | Reset the selected provider's Usagebar state; provider CLI sessions remain provider-owned. |
 | Updates | Check for a new version, or turn **Update Automatically** on or off. |

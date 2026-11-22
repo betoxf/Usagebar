@@ -27,6 +27,10 @@ final class UsageViewModel: ObservableObject {
     /// CLIs whose own sign-in has expired; only that CLI's login can renew it.
     @Published private(set) var needsSignIn: Set<DisplayProvider> = []
 
+    /// CLIs whose short-lived access token lapsed while their sign-in still
+    /// works. The CLI renews it the next time it runs; no login is needed.
+    @Published private(set) var renewalPending: Set<DisplayProvider> = []
+
     /// Providers whose last request couldn't reach the internet. While any are
     /// listed, a path monitor waits for the network to come back.
     @Published private(set) var offlineProviders: Set<DisplayProvider> = [] {
@@ -247,11 +251,13 @@ final class UsageViewModel: ObservableObject {
 
     /// Picks up a CLI sign-in renewed outside Usagebar. Drops the failure delay
     /// for this provider alone, keeps any server cooldown, and rereads its CLI's
-    /// credentials. An expired Claude token is checked locally, with no request.
+    /// credentials. An expired Claude or Cursor token is checked locally, with no request.
     func retryAfterSignIn(_ provider: DisplayProvider) async {
         switch provider {
         case .claude: await ClaudeOAuthService.shared.clearCache()
         case .codex: await CodexAPIService.shared.clearCache()
+        case .cursor: await CursorAPIService.shared.clearCache()
+        case .kimi: await KimiAPIService.shared.clearCache()
         default: break
         }
         await retryNow([provider])
@@ -476,6 +482,7 @@ final class UsageViewModel: ObservableObject {
             }
             setError(nil, for: provider)
             needsSignIn.remove(provider)
+            renewalPending.remove(provider)
             offlineProviders.remove(provider)
             refreshStates[provider, default: .init()].succeeded(at: Date())
         } catch {
@@ -490,8 +497,21 @@ final class UsageViewModel: ObservableObject {
             )
             switch error {
             case APIError.cliSignInExpired: needsSignIn.insert(provider)
-            case APIError.unauthorized where provider == .claude: needsSignIn.insert(provider)
+            case APIError.unauthorized where provider == .claude || provider == .cursor: needsSignIn.insert(provider)
+            case KimiServiceError.expiredCLICredential: needsSignIn.insert(provider)
+            case KimiServiceError.unauthorized where kimiAuthSource == .cli: needsSignIn.insert(provider)
             default: needsSignIn.remove(provider)
+            }
+            if case APIError.cliRenewalPending = error {
+                renewalPending.insert(provider)
+                // Only a local credential read until the CLI renews, so check at
+                // the normal pace instead of backing off for up to 30 minutes.
+                refreshStates[provider, default: .init()].retryAt = max(
+                    Date().addingTimeInterval(effectiveRefreshInterval),
+                    refreshStates[provider]?.serverRetryAt ?? .distantPast
+                )
+            } else {
+                renewalPending.remove(provider)
             }
             if Self.isConnectionError(error) {
                 offlineProviders.insert(provider)
@@ -663,6 +683,7 @@ final class UsageViewModel: ObservableObject {
             self.usageData = .placeholder
             self.claudeError = nil
             self.needsSignIn.remove(.claude)
+            self.renewalPending.remove(.claude)
             self.refreshStates[.claude] = nil
         })
     }
@@ -690,6 +711,7 @@ final class UsageViewModel: ObservableObject {
         }, reset: {
             self.kimiUsageData = .placeholder
             self.kimiError = nil
+            self.needsSignIn.remove(.kimi)
             self.refreshStates[.kimi] = nil
         })
     }
@@ -759,6 +781,7 @@ final class UsageViewModel: ObservableObject {
             changeCredentials({ CursorAPIService.shared.clearCache() }, reset: {
                 self.cursorUsageData = .placeholder
                 self.cursorError = nil
+                self.needsSignIn.remove(.cursor)
                 self.refreshStates[.cursor] = nil
             })
         }

@@ -17,6 +17,7 @@ struct PerformanceRegressionTests {
         try await testRejectedKeys()
         try await testExpiredSignIn()
         try await testOffline()
+        try await testRenewalPending()
         testTerminalCommands()
         try await testTerminalSessionScan()
         await testProviderHTTP()
@@ -211,6 +212,37 @@ struct PerformanceRegressionTests {
         check(after[.claude] == (before[.claude] ?? 0) + 1, "A renewed sign-in waited out the failure delay")
         check(after[.codex] == before[.codex], "Picking up a sign-in refetched other providers")
         check(model.needsSignIn.isEmpty, "A renewed sign-in kept asking to sign in")
+
+        // Cursor rejecting its token asks for Cursor Agent's login too.
+        await FakeProviders.setAvailable([.claude, .codex, .cursor])
+        await FakeProviders.setError(.unauthorized, for: .cursor)
+        model.showCursor = true
+        await model.rediscoverCredentialsAndRefresh()
+        check(model.needsSignIn == [.cursor], "A rejected Cursor sign-in didn't ask to sign in again")
+        model.showCursor = false
+    }
+
+    @MainActor static func testRenewalPending() async throws {
+        await FakeProviders.reset()
+        await FakeProviders.setError(.cliRenewalPending(tool: "Claude Code"), for: .claude)
+        let model = UsageViewModel(startAutomatically: false)
+        defer { model.stopAutoRefresh() }
+        model.showClaude = true
+        model.showCodex = false
+        model.showCursor = false
+        model.showKimi = false
+        model.showZai = false
+        await model.refresh()
+        check(model.renewalPending == [.claude], "A lapsed access token wasn't marked as waiting for Claude Code")
+        check(model.needsSignIn.isEmpty, "A lapsed access token asked for a new login")
+        // A second failure must not back off: the check is local until Claude Code renews.
+        await model.refresh(); await model.refresh()
+        let retry = model.refreshStates[.claude]?.retryAt ?? .distantFuture
+        check(retry <= Date().addingTimeInterval(601), "Waiting for a renewal backed off past the normal pace")
+        await FakeProviders.clearError(for: .claude)
+        await model.retryAfterSignIn(.claude)
+        try await eventually { !model.isLoading && model.claudeError == nil }
+        check(model.renewalPending.isEmpty, "The renewed token kept the waiting card")
     }
 
     @MainActor static func testOffline() async throws {

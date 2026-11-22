@@ -483,6 +483,10 @@ extension NSColor {
 final class UsagePanel: NSPanel {
     private var outsideClickMonitor: Any?
     private var keyMonitor: Any?
+    /// The status item, in screen coordinates. A click there is the item's own
+    /// toggle, so it mustn't also count as an outside click, which would close
+    /// the panel on press and reopen it on release.
+    private var statusItemFrame: NSRect = .zero
     var onClose: () -> Void = {}
 
     init(rootView: UsagePanelView) {
@@ -525,6 +529,12 @@ final class UsagePanel: NSPanel {
         let visible = (buttonWindow.screen ?? NSScreen.main)?.visibleFrame ?? buttonFrame
         let x = min(max(buttonFrame.midX - size.width / 2, visible.minX + 8), visible.maxX - size.width - 8)
         let y = buttonFrame.minY - size.height - 6
+        // The whole item, up to the screen's top edge: the button can be shorter
+        // than the menu bar, and a click on the very top row lands at maxY.
+        let itemFrame = buttonWindow.frame.union(buttonFrame)
+        let screenTop = (buttonWindow.screen ?? NSScreen.main)?.frame.maxY ?? itemFrame.maxY
+        statusItemFrame = NSRect(x: itemFrame.minX, y: itemFrame.minY,
+                                 width: itemFrame.width, height: max(itemFrame.maxY, screenTop) - itemFrame.minY + 1)
         setFrame(NSRect(x: x, y: y, width: size.width, height: size.height), display: true)
         makeKeyAndOrderFront(nil)
         startMonitoring()
@@ -545,7 +555,8 @@ final class UsagePanel: NSPanel {
     private func startMonitoring() {
         stopMonitoring()
         outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-            self?.close()
+            guard let self, !self.statusItemFrame.contains(NSEvent.mouseLocation) else { return }
+            self.close()
         }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard event.keyCode == 53, self?.isKeyWindow == true else { return event }

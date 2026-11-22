@@ -46,13 +46,14 @@ nonisolated enum KimiAuthSource { case none, cli }
 nonisolated enum APIError: Error {
     case unauthorized
     case cliSignInExpired(tool: String)
+    case cliRenewalPending(tool: String)
     case networkError(Error)
     case rateLimited(retryAfter: Date?)
     var retryAfter: Date? { if case .rateLimited(let date) = self { return date }; return nil }
     var errorDescription: String? { "Test provider error" }
 }
 nonisolated enum KimiServiceError: Error {
-    case unavailable
+    case unavailable, expiredCLICredential, unauthorized
     var retryAfter: Date? { nil }
     var errorDescription: String? { "Test provider error" }
 }

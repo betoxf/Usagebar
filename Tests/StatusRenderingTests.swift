@@ -15,6 +15,10 @@ extension UsageViewModel {
         needsSignIn = providers
     }
 
+    fileprivate func useRenewalFixture(_ providers: Set<DisplayProvider>) {
+        renewalPending = providers
+    }
+
     fileprivate func useOfflineFixture(_ providers: Set<DisplayProvider>) {
         offlineProviders = providers
     }
@@ -492,8 +496,47 @@ extension AppDelegate {
         precondition(codexCard?.actionDetail == "codex login", "The Codex login command drifted")
         precondition(panelModel.cards.first { $0.provider == .claude }?.actionTitle == nil, "Claude kept a stale button")
 
-        viewModel.useSignInFixture([])
+        // Cursor Agent and the Kimi Code CLI get the same card with their logins.
+        let connected = viewModel.availableProviders
+        viewModel.showCursor = true
+        viewModel.showKimi = true
+        viewModel.useRenderingFixtures(connected.union([.cursor, .kimi]))
+        viewModel.useSignInFixture([.cursor, .kimi])
         viewModel.codexError = nil
+        updatePanel()
+        let cursorCard = panelModel.cards.first { $0.provider == .cursor }
+        precondition(cursorCard?.message == "Cursor sign-in expired", "An expired Cursor sign-in read wrong")
+        precondition(cursorCard?.actionTitle == "Sign In Again", "An expired Cursor sign-in had no button")
+        precondition(cursorCard?.actionDetail == "cursor-agent login", "The Cursor login command drifted")
+        let kimiCard = panelModel.cards.first { $0.provider == .kimi }
+        precondition(kimiCard?.actionTitle == "Sign In Again", "An expired Kimi Code sign-in had no button")
+        precondition(kimiCard?.actionDetail == "kimi login", "The Kimi Code login command drifted")
+        viewModel.showCursor = false
+        viewModel.showKimi = false
+        viewModel.useRenderingFixtures(connected)
+
+        viewModel.useSignInFixture([])
+
+        // A lapsed access token waits for Claude Code instead of asking for a login.
+        viewModel.useRenewalFixture([.claude])
+        viewModel.claudeError = APIError.cliRenewalPending(tool: "Claude Code").errorDescription
+        updatePanel()
+        let renewing = panelModel.cards.first { $0.provider == .claude }
+        precondition(renewing?.message == "Waiting for Claude Code to renew its sign-in", "The renewal card read wrong")
+        precondition(renewing?.actionTitle == nil, "A lapsed access token offered a new login")
+        for (name, appearance) in [("panel-renewing-light", NSAppearance.Name.aqua)] {
+            let view = NSHostingView(rootView: UsagePanelView(model: panelModel))
+            view.appearance = NSAppearance(named: appearance)
+            view.frame = NSRect(origin: .zero, size: view.fittingSize)
+            view.layoutSubtreeIfNeeded()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+            guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
+            view.cacheDisplay(in: view.bounds, to: bitmap)
+            let url = output.deletingPathExtension().appendingPathExtension("\(name).png")
+            try bitmap.representation(using: .png, properties: [:])?.write(to: url)
+        }
+        viewModel.useRenewalFixture([])
+        viewModel.claudeError = nil
 
         // Offline: one notice above the cards instead of an error on each.
         viewModel.useOfflineFixture([.claude, .codex])
@@ -521,15 +564,18 @@ extension AppDelegate {
         precondition(panelModel.offlineNotice == nil, "The offline notice outlived the outage")
         isPanelOpen = false
 
-        // A left click opens the panel; a right click switches providers.
+        // Either click opens the panel and leaves the bar on its provider.
         let shown = currentProvider
         statusBarClicked(isRightClick: true)
-        precondition(currentProvider != shown, "A right click didn't switch providers")
-        precondition(!panel.isVisible, "A right click opened the panel")
+        precondition(currentProvider == shown, "A right click switched providers")
+        precondition(panel.isVisible, "A right click didn't open the panel")
+        statusBarClicked(isRightClick: true)
+        precondition(!panel.isVisible, "A second right click didn't close the panel")
         statusBarClicked(isRightClick: false)
         precondition(panel.isVisible, "A left click didn't open the panel")
         statusBarClicked(isRightClick: false)
         precondition(!panel.isVisible, "A second left click didn't close the panel")
+        precondition(currentProvider == shown, "A click switched providers")
         isPanelOpen = false
     }
 }

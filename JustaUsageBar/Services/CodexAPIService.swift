@@ -78,6 +78,10 @@ final class CodexAPIService {
         var accessToken: String
         var accountId: String?
         var isApiKey: Bool = false
+        /// The access token's `exp`. It lasts days; Codex renews it with its
+        /// refresh token when it runs.
+        var expiresAt: Date?
+        var canRenew = false
     }
 
     private var cachedCredentials: CodexCredentials?
@@ -120,7 +124,11 @@ final class CodexAPIService {
         // OAuth format
         if let tokens = json["tokens"] as? [String: Any],
            let accessToken = tokens["access_token"] as? String {
-            let creds = CodexCredentials(accessToken: accessToken, accountId: tokens["account_id"] as? String)
+            let refresh = tokens["refresh_token"] as? String
+            let creds = CodexCredentials(
+                accessToken: accessToken, accountId: tokens["account_id"] as? String,
+                expiresAt: Self.expiry(ofJWT: accessToken), canRenew: !(refresh ?? "").isEmpty
+            )
             cachedCredentials = creds
             lastCredentialCheck = Date()
             return creds
@@ -135,6 +143,24 @@ final class CodexAPIService {
         loadCredentials() != nil
     }
 
+    /// Only a token Codex can renew itself counts; without a refresh token,
+    /// only a new login helps.
+    nonisolated private static func hasExpired(_ creds: CodexCredentials) -> Bool {
+        guard creds.canRenew, let expiresAt = creds.expiresAt else { return false }
+        return expiresAt <= Date().addingTimeInterval(60)
+    }
+
+    nonisolated private static func expiry(ofJWT jwt: String) -> Date? {
+        let parts = jwt.split(separator: ".")
+        guard parts.count >= 2 else { return nil }
+        var payload = String(parts[1]).replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+        payload += String(repeating: "=", count: (4 - payload.count % 4) % 4)
+        guard let data = Data(base64Encoded: payload),
+              let claims = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let exp = claims["exp"] as? Double else { return nil }
+        return Date(timeIntervalSince1970: exp)
+    }
+
     func clearCache() {
         cachedCredentials = nil
         lastCredentialCheck = nil
@@ -147,8 +173,17 @@ final class CodexAPIService {
     }
 
     private func fetchUsage(allowRediscovery: Bool) async throws -> CodexUsageData {
-        guard let creds = loadCredentials() else {
+        guard var creds = loadCredentials() else {
             throw APIError.noCredentials
+        }
+        // An expired token would only be rejected. Read Codex's file again, and
+        // if it is still expired, wait for Codex to renew it without a request.
+        if Self.hasExpired(creds) {
+            clearCache()
+            guard let reloaded = loadCredentials(), !Self.hasExpired(reloaded) else {
+                throw APIError.cliRenewalPending(tool: "Codex")
+            }
+            creds = reloaded
         }
 
         let baseURL = getBaseURL()
@@ -190,7 +225,8 @@ final class CodexAPIService {
             if allowRediscovery, let reloaded = loadCredentials(), reloaded.accessToken != creds.accessToken {
                 return try await fetchUsage(allowRediscovery: false)
             }
-            throw creds.isApiKey ? APIError.unauthorized : APIError.cliSignInExpired(tool: "Codex")
+            if creds.isApiKey { throw APIError.unauthorized }
+            throw Self.hasExpired(creds) ? APIError.cliRenewalPending(tool: "Codex") : APIError.cliSignInExpired(tool: "Codex")
         default:
             throw APIError.unknown(httpResponse.statusCode)
         }

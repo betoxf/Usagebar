@@ -97,7 +97,7 @@ nonisolated enum ProviderSignIn: Equatable {
     }
 
     /// Apps opened from Finder get a bare PATH, so also look where installers put CLIs.
-    private static func locate(_ name: String, alsoIn directories: [String]) -> String? {
+    static func locate(_ name: String, alsoIn directories: [String] = []) -> String? {
         let fileManager = FileManager.default
         let home = fileManager.homeDirectoryForCurrentUser.path
         let path = ProcessInfo.processInfo.environment["PATH"]?.split(separator: ":").map(String.init) ?? []

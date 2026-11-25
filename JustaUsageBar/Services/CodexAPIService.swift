@@ -166,6 +166,20 @@ final class CodexAPIService {
         lastCredentialCheck = nil
     }
 
+    /// Lets the next fetch ask Codex to renew an expired sign-in. Only a person's
+    /// Refresh or opening the panel asks, never the timer, so a request no fetch
+    /// took right away (a server cooldown, sleep) lapses.
+    private var cliRenewalRequestedAt: Date?
+
+    func requestCLIRenewal() {
+        cliRenewalRequestedAt = Date()
+    }
+
+    private func takeCLIRenewalRequest() -> Bool {
+        defer { cliRenewalRequestedAt = nil }
+        return cliRenewalRequestedAt.map { Date().timeIntervalSince($0) < 30 } ?? false
+    }
+
     // MARK: - Fetch Usage
 
     func fetchUsage() async throws -> CodexUsageData {
@@ -178,13 +192,23 @@ final class CodexAPIService {
         }
         // An expired token would only be rejected. Read Codex's file again, and
         // if it is still expired, wait for Codex to renew it without a request.
+        // When someone is looking (Refresh or the panel), ask Codex to renew it now.
         if Self.hasExpired(creds) {
             clearCache()
-            guard let reloaded = loadCredentials(), !Self.hasExpired(reloaded) else {
+            var reloaded = loadCredentials()
+            if takeCLIRenewalRequest(), reloaded.map(Self.hasExpired) ?? false {
+                _ = await CLIRenewal.codex.renew {
+                    clearCache()
+                    reloaded = loadCredentials()
+                    return reloaded.map { !Self.hasExpired($0) } ?? false
+                }
+            }
+            guard let reloaded, !Self.hasExpired(reloaded) else {
                 throw APIError.cliRenewalPending(tool: "Codex")
             }
             creds = reloaded
         }
+        _ = takeCLIRenewalRequest()
 
         let baseURL = getBaseURL()
         let usageURL: String

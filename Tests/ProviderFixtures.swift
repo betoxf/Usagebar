@@ -64,7 +64,9 @@ nonisolated func isRequestCancelled(_ error: Error) -> Bool {
 @ProviderActor final class ClaudeOAuthService {
     static let shared = ClaudeOAuthService()
     var hasCredentials: Bool { FakeProviders.probe(.claude) }
+    private(set) var renewalRequests = 0
     func clearCache() {}
+    func requestCLIRenewal() { renewalRequests += 1 }
     func clearPersistedCredentials() {}
 }
 @ProviderActor final class CredentialStorage {
@@ -97,7 +99,9 @@ nonisolated struct CodexUsageData { var testValue = 0; static let placeholder = 
 @ProviderActor final class CodexAPIService {
     static let shared = CodexAPIService()
     var hasCredentials: Bool { FakeProviders.probe(.codex) }
+    private(set) var renewalRequests = 0
     func clearCache() {}
+    func requestCLIRenewal() { renewalRequests += 1 }
     func fetchUsage() async throws -> CodexUsageData {
         let value = try await FakeProviders.fetch(.codex)
         return CodexUsageData(testValue: value)

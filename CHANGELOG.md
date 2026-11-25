@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Renew an expired Claude Code or Codex sign-in without opening the CLI. When you open the panel or click **Refresh**, Usagebar runs Claude Code's `/usage` or asks Codex's `codex app-server` for your limits, so the CLI renews its token itself and saves it where it always does. Usagebar still never uses their refresh tokens, nothing is sent to a model, and no session or terminal is opened.
+
 ## [1.14.3](https://github.com/betoxf/Usagebar/releases/tag/v1.14.3) — 2026-11-14
 
 - Give the panel a solid background and cards that match the Connections window, instead of the blurred desktop behind it.

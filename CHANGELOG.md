@@ -1,8 +1,11 @@
 # Changelog
 
-## Unreleased
+## [1.15.0](https://github.com/betoxf/Usagebar/releases/tag/v1.15.0) — 2026-11-25
 
+- Stop asking you to sign in to Claude Code or Codex again after a few idle hours. Their access tokens expire every few hours, but their sign-ins last weeks. When only the token has expired, the card keeps your last reading and says it's waiting for the tool to renew it, with no login button. **Sign In Again** appears only when the sign-in itself has ended, and it runs `claude auth login` or `codex login` in Terminal. Cursor and Kimi Code get the same button.
 - Renew an expired Claude Code or Codex sign-in without opening the CLI. When you open the panel or click **Refresh**, Usagebar runs Claude Code's `/usage` or asks Codex's `codex app-server` for your limits, so the CLI renews its token itself and saves it where it always does. Usagebar still never uses their refresh tokens, nothing is sent to a model, and no session or terminal is opened.
+- Show one "No internet connection" notice instead of an error on every card, keep the last readings, and refresh on its own when the Mac is back online.
+- Open the panel with either click on the menu-bar item. Pick the provider to show in the bar from the panel; clicking the item no longer switches providers.
 
 ## [1.14.3](https://github.com/betoxf/Usagebar/releases/tag/v1.14.3) — 2026-11-14
 

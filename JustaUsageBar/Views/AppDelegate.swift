@@ -60,6 +60,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private var setupWindow: NSWindow?
     private let setupModel = SetupModel()
     private let setupCheckTimer = RepeatingTimer()
+    /// CLI logins running in Terminal from a card's Sign In Again.
+    private var signInWatches: [DisplayProvider: DispatchSourceFileSystemObject] = [:]
     private let preferredProviderDefaultsKey = "preferredDisplayProvider"
 
     // Provider switching state
@@ -666,6 +668,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         isPanelOpen = true
         updatePanel()
         panel.show(below: button)
+        // Claude Code or Cursor Agent may have renewed its sign-in since the last
+        // try. Their expired tokens are checked locally, so this sends nothing
+        // until one is fresh.
+        for provider in viewModel.needsSignIn.union(viewModel.renewalPending).intersection([.claude, .codex, .cursor]) {
+            Task { await viewModel.retryAfterSignIn(provider) }
+        }
     }
 
     /// Fills the panel from the normalized usage models. Runs whenever the
@@ -673,7 +681,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     private func updatePanel() {
         guard isPanelOpen else { return }
         panelModel.needsSetup = !viewModel.hasCredentials
-        panelModel.cards = panelCards()
+        let cards = panelCards()
+        panelModel.cards = cards
+        panelModel.offlineNotice = cards.contains { isOffline($0.provider) }
+            ? UsagePanelNotice(
+                title: "No internet connection",
+                note: "Showing the last readings. Usagebar refreshes when you're back online."
+            )
+            : nil
         panelModel.currentProvider = viewModel.hasCredentials ? currentProvider : nil
         panelModel.updateVersion = availableUpdateVersion
         panelModel.isRefreshing = viewModel.isLoading
@@ -698,6 +713,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         return minutes < 1 ? "Updated just now" : "Updated \(minutes)m ago"
     }
 
+    /// A CLI whose own sign-in expired: what happened, what the card shows
+    /// meanwhile, and the login that fixes it.
+    private func signInCard(
+        _ provider: DisplayProvider, detail: String, rows: [UsagePanelRow], tool: String, command: String?
+    ) -> UsagePanelCard {
+        let waiting = signInWatches[provider] != nil
+        return UsagePanelCard(
+            provider: provider, detail: detail, rows: rows,
+            message: "\(tool) sign-in expired",
+            note: waiting
+                ? "Finish in Terminal. Usagebar refreshes when the login ends."
+                : "Showing the last reading until you sign in again.",
+            actionTitle: "Sign In Again",
+            actionDetail: command
+        )
+    }
+
+    /// A "Not connected" card keeps its own message even while offline.
+    private func isOffline(_ provider: DisplayProvider) -> Bool {
+        viewModel.offlineProviders.contains(provider) && hasCredentials(for: provider)
+    }
+
     private func panelCards() -> [UsagePanelCard] {
         var cards: [UsagePanelCard] = []
 
@@ -719,10 +756,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                     rows.append(UsagePanelRow(label: "Fable", percent: usage.fableUsed ?? 0, resetText: usage.timeUntilFableReset))
                 }
                 let error = viewModel.claudeError
-                cards.append(UsagePanelCard(
-                    provider: .claude, detail: detail, rows: rows, message: error,
-                    actionTitle: error != nil && shouldPromptClaudeAuthentication ? "How to authenticate Claude" : nil
-                ))
+                if viewModel.renewalPending.contains(.claude) {
+                    cards.append(UsagePanelCard(
+                        provider: .claude, detail: detail, rows: rows,
+                        message: "Waiting for Claude Code to renew its sign-in",
+                        note: "It renews on its own the next time you use Claude Code. Showing the last reading."
+                    ))
+                } else if viewModel.needsSignIn.contains(.claude) {
+                    let isBrowser = viewModel.claudeAuthSource == .webSession
+                    cards.append(signInCard(
+                        .claude, detail: detail, rows: rows, tool: isBrowser ? "Claude" : "Claude Code",
+                        command: isBrowser ? nil : "claude auth login"
+                    ))
+                } else {
+                    cards.append(UsagePanelCard(
+                        provider: .claude, detail: detail, rows: rows, message: error,
+                        actionTitle: error != nil && shouldPromptClaudeAuthentication ? "How to authenticate Claude" : nil
+                    ))
+                }
             } else {
                 cards.append(UsagePanelCard(
                     provider: .claude, detail: detail, rows: [],
@@ -744,10 +795,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                     rows.append(UsagePanelRow(label: "7d", percent: codex.secondaryUsedPercent, resetText: codex.timeUntilSecondaryReset))
                 }
                 let error = viewModel.codexError
-                cards.append(UsagePanelCard(
-                    provider: .codex, detail: detail, rows: rows, message: error,
-                    actionTitle: error != nil && shouldPromptCodexAuthentication ? "How to authenticate Codex" : nil
-                ))
+                if viewModel.renewalPending.contains(.codex) {
+                    cards.append(UsagePanelCard(
+                        provider: .codex, detail: detail, rows: rows,
+                        message: "Waiting for Codex to renew its sign-in",
+                        note: "It renews on its own the next time you use Codex. Showing the last reading."
+                    ))
+                } else if viewModel.needsSignIn.contains(.codex) {
+                    cards.append(signInCard(.codex, detail: detail, rows: rows, tool: "Codex", command: "codex login"))
+                } else {
+                    cards.append(UsagePanelCard(
+                        provider: .codex, detail: detail, rows: rows, message: error,
+                        actionTitle: error != nil && shouldPromptCodexAuthentication ? "How to authenticate Codex" : nil
+                    ))
+                }
             } else {
                 cards.append(UsagePanelCard(
                     provider: .codex, detail: detail, rows: [],
@@ -758,12 +819,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
 
         if viewModel.hasCursorCredentials && viewModel.showCursor {
             let cursor = viewModel.cursorUsageData
-            cards.append(UsagePanelCard(
-                provider: .cursor,
-                detail: cursor.planName != "unknown" ? displayPlanName(cursor.planName) : "",
-                rows: [UsagePanelRow(label: cursor.windowLabel, percent: cursor.usedPercent, resetText: cursor.timeUntilReset)],
-                message: viewModel.cursorError ?? (cursor.weeklyIsStale ? "Couldn't refresh weekly usage" : nil)
-            ))
+            let detail = cursor.planName != "unknown" ? displayPlanName(cursor.planName) : ""
+            let rows = [UsagePanelRow(label: cursor.windowLabel, percent: cursor.usedPercent, resetText: cursor.timeUntilReset)]
+            if viewModel.renewalPending.contains(.cursor) {
+                cards.append(UsagePanelCard(
+                    provider: .cursor, detail: detail, rows: rows,
+                    message: "Waiting for Cursor to renew its sign-in",
+                    note: "It renews on its own the next time you open Cursor or Cursor Agent. Showing the last reading."
+                ))
+            } else if viewModel.needsSignIn.contains(.cursor) {
+                cards.append(signInCard(.cursor, detail: detail, rows: rows, tool: "Cursor", command: "cursor-agent login"))
+            } else {
+                cards.append(UsagePanelCard(
+                    provider: .cursor, detail: detail, rows: rows,
+                    message: viewModel.cursorError ?? (cursor.weeklyIsStale ? "Couldn't refresh weekly usage" : nil)
+                ))
+            }
         }
 
         if viewModel.hasKimiCredentials && viewModel.showKimi {
@@ -774,10 +845,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             }
             rows.append(UsagePanelRow(label: "7d", percent: kimi.weeklyUsedPercent, resetText: kimi.timeUntilWeeklyReset))
             let error = viewModel.kimiError
-            cards.append(UsagePanelCard(
-                provider: .kimi, detail: viewModel.kimiAuthSource.displayName, rows: rows,
-                message: error, actionTitle: error != nil ? "Kimi Code Setup…" : nil
-            ))
+            let detail = viewModel.kimiAuthSource.displayName
+            if viewModel.needsSignIn.contains(.kimi) {
+                cards.append(signInCard(.kimi, detail: detail, rows: rows, tool: "Kimi Code", command: "kimi login"))
+            } else {
+                cards.append(UsagePanelCard(
+                    provider: .kimi, detail: detail, rows: rows,
+                    message: error, actionTitle: error != nil ? "Kimi Code Setup…" : nil
+                ))
+            }
         }
 
         if viewModel.hasZaiCredentials && viewModel.showZai {
@@ -830,7 +906,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             ))
         }
 
-        return cards
+        // One notice above the cards says the Mac is offline, so the cards
+        // don't each repeat it.
+        return cards.map { card in
+            guard isOffline(card.provider) else { return card }
+            var card = card
+            card.message = nil
+            card.note = nil
+            card.actionTitle = nil
+            card.actionDetail = nil
+            return card
+        }
     }
 
     private func configurePanelActions() {
@@ -849,6 +935,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
             self.panel.close()
             guard self.hasCredentials(for: provider) else {
                 self.showSetupWindow()
+                return
+            }
+            if self.viewModel.needsSignIn.contains(provider) {
+                self.signInAgain(provider)
                 return
             }
             switch provider {
@@ -881,36 +971,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
     }
 
     @objc private func statusBarButtonClicked() {
-        let event = NSApp.currentEvent
+        statusBarClicked(isRightClick: NSApp.currentEvent?.type == .rightMouseUp)
+    }
 
-        // Right click shows the usage panel
-        if event?.type == .rightMouseUp {
-            togglePanel()
-            return
-        }
-
-        // With nothing to show yet, the bar's only job is setup.
+    private func statusBarClicked(isRightClick: Bool) {
+        // With nothing to show yet, a left click opens setup; a right click
+        // still opens the panel, so Quit stays in reach.
         if !viewModel.hasCredentials {
-            showSetupWindow()
+            if isRightClick { togglePanel() } else { showSetupWindow() }
             return
         }
 
-        // Left click cycles to the next provider when more than one is shown
-        if event?.type == .leftMouseUp {
-            if displayableProviders().count > 1, let next = providerAfter(currentProvider) {
-                // A manual click always wins, even while focus-follow has the
-                // bar locked to the frontmost app's provider. Suspend the lock
-                // for now; the next app switch (including switching back to
-                // Claude/Cursor/etc.) re-applies focus-follow.
-                focusProvider = nil
-                isManualPick = true
-                setCurrentProvider(next)
-                restartProviderAnimation()
-            } else {
-                // If only one provider, show the usage panel
-                togglePanel()
-            }
-        }
+        // Either click opens the panel; a provider is picked there, so the bar
+        // never switches under a click.
+        togglePanel()
     }
 
     private func showSetupOnFirstLaunch() {
@@ -1001,7 +1075,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         switch signIn {
         case .terminal:
             let name = provider.rawValue.capitalized
-            if signIn.runInTerminal(signingInTo: name) {
+            if signIn.runInTerminal(signingInTo: name) != nil {
                 setupModel.startConnecting(provider)
             } else {
                 presentAlert(
@@ -1035,6 +1109,77 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         Task {
             await viewModel.rediscoverCredentialsAndRefresh()
         }
+    }
+
+    /// Runs the CLI's own login in Terminal to renew an expired sign-in.
+    private func signInAgain(_ provider: DisplayProvider) {
+        // A claude.ai browser session is renewed in Usagebar's own sign-in.
+        if provider == .claude, viewModel.claudeAuthSource == .webSession {
+            showSetupWindow()
+            setupModel.isSigningInToClaude = true
+            return
+        }
+        let signIn = ProviderSignIn.available(for: provider)
+        guard case .terminal = signIn else {
+            // The CLI isn't on this Mac, so offer the other ways in.
+            switch (provider, signIn) {
+            case (.claude, _): authenticateClaude()
+            case (.kimi, _): authenticateKimi()
+            case (_, .download(_, let url)): NSWorkspace.shared.open(url)
+            default: authenticateCodex()
+            }
+            return
+        }
+        let name = switch provider {
+        case .claude: "Claude Code"
+        case .cursor: "Cursor"
+        case .kimi: "Kimi Code"
+        default: "Codex"
+        }
+        guard let script = signIn.runInTerminal(signingInTo: name) else {
+            presentAlert(
+                title: "Couldn't Open Terminal",
+                message: "Run this in Terminal to sign in to \(name):\n\n\(signIn.command ?? "")",
+                style: .warning
+            )
+            return
+        }
+        watchSignIn(provider, script: script)
+    }
+
+    /// The sign-in script deletes itself when the login ends, so that is when
+    /// to look for the renewed sign-in. Nothing polls while the user signs in.
+    private func watchSignIn(_ provider: DisplayProvider, script: URL) {
+        stopWatchingSignIn(provider)
+        let descriptor = open(script.path, O_EVTONLY)
+        guard descriptor >= 0 else { return }
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: descriptor, eventMask: [.delete, .rename], queue: .main
+        )
+        source.setEventHandler { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.stopWatchingSignIn(provider)
+                Task { await self.viewModel.retryAfterSignIn(provider) }
+            }
+        }
+        source.setCancelHandler { close(descriptor) }
+        signInWatches[provider] = source
+        source.resume()
+        updatePanel()
+        // A login left open in Terminal stops being watched after a while.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 900) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.signInWatches[provider] === source else { return }
+                self.stopWatchingSignIn(provider)
+            }
+        }
+    }
+
+    private func stopWatchingSignIn(_ provider: DisplayProvider) {
+        guard let source = signInWatches.removeValue(forKey: provider) else { return }
+        source.cancel()
+        updatePanel()
     }
 
     @objc private func authenticateClaude() {

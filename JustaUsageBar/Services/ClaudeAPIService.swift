@@ -15,6 +15,9 @@ nonisolated enum APIError: Error, LocalizedError {
     case unknown(Int)
     /// The CLI that owns the sign-in has to renew it; Usagebar never does.
     case cliSignInExpired(tool: String)
+    /// The CLI's access token lapsed but its sign-in hasn't: the CLI renews
+    /// the token by itself the next time it runs, with no login.
+    case cliRenewalPending(tool: String)
 
     var isRateLimited: Bool {
         if case .rateLimited = self { return true }
@@ -44,6 +47,8 @@ nonisolated enum APIError: Error, LocalizedError {
             return "Unknown error (status: \(code))"
         case .cliSignInExpired(let tool):
             return "Open \(tool) to renew its sign-in — showing the last reading"
+        case .cliRenewalPending(let tool):
+            return "Waiting for \(tool) to renew its sign-in — showing the last reading"
         }
     }
 }

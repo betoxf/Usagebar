@@ -10,6 +10,18 @@ extension UsageViewModel {
             refreshStates[provider, default: .init()].succeeded(at: Date())
         }
     }
+
+    fileprivate func useSignInFixture(_ providers: Set<DisplayProvider>) {
+        needsSignIn = providers
+    }
+
+    fileprivate func useRenewalFixture(_ providers: Set<DisplayProvider>) {
+        renewalPending = providers
+    }
+
+    fileprivate func useOfflineFixture(_ providers: Set<DisplayProvider>) {
+        offlineProviders = providers
+    }
 }
 
 extension AppDelegate {
@@ -53,7 +65,7 @@ extension AppDelegate {
         precondition(ProviderSignIn.terminal(executable: "/a b/it's", arguments: ["login"]).command == "'/a b/it'\\''s' 'login'",
                      "Login command was not quoted for the shell")
         verifySetupModel()
-        statusBarButtonClicked()
+        statusBarClicked(isRightClick: false)
         precondition(setupWindow?.isVisible == true, "A click with nothing connected did not open setup")
         setupWindow?.close()
         precondition(setupWindow == nil, "Closing setup left it watching for sign-ins")
@@ -425,6 +437,145 @@ extension AppDelegate {
             let url = output.deletingPathExtension().appendingPathExtension("\(name).png")
             try bitmap.representation(using: .png, properties: [:])?.write(to: url)
         }
+
+        // Claude Code's sign-in expired: the card says so and offers its login.
+        viewModel.useSignInFixture([.claude])
+        viewModel.claudeError = APIError.cliSignInExpired(tool: "Claude Code").errorDescription
+        updatePanel()
+        let claudeCard = panelModel.cards.first { $0.provider == .claude }
+        precondition(claudeCard?.actionTitle == "Sign In Again", "An expired Claude sign-in had no button")
+        precondition(claudeCard?.actionDetail == "claude auth login", "The Claude login command drifted")
+        for (name, appearance) in [("panel-signin-light", NSAppearance.Name.aqua), ("panel-signin-dark", .darkAqua)] {
+            let view = NSHostingView(rootView: UsagePanelView(model: panelModel))
+            view.appearance = NSAppearance(named: appearance)
+            view.frame = NSRect(origin: .zero, size: view.fittingSize)
+            view.layoutSubtreeIfNeeded()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+            guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
+            view.cacheDisplay(in: view.bounds, to: bitmap)
+            let url = output.deletingPathExtension().appendingPathExtension("\(name).png")
+            try bitmap.representation(using: .png, properties: [:])?.write(to: url)
+        }
+
+        // Sign In Again waits for the login script to delete itself, then retries.
+        let script = FileManager.default.temporaryDirectory
+            .appendingPathComponent("usagebar-signin-\(UUID().uuidString).command")
+        try Data().write(to: script)
+        watchSignIn(.claude, script: script)
+        let waiting = panelModel.cards.first { $0.provider == .claude }
+        precondition(signInWatches[.claude] != nil, "Sign In Again started no watch")
+        precondition(waiting?.note?.hasPrefix("Finish in Terminal") == true, "The card hid the running login")
+        precondition(waiting?.actionTitle == "Sign In Again", "A running login left no way to start again")
+        for (name, appearance) in [("panel-signin-waiting-light", NSAppearance.Name.aqua)] {
+            let view = NSHostingView(rootView: UsagePanelView(model: panelModel))
+            view.appearance = NSAppearance(named: appearance)
+            view.frame = NSRect(origin: .zero, size: view.fittingSize)
+            view.layoutSubtreeIfNeeded()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+            guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
+            view.cacheDisplay(in: view.bounds, to: bitmap)
+            let url = output.deletingPathExtension().appendingPathExtension("\(name).png")
+            try bitmap.representation(using: .png, properties: [:])?.write(to: url)
+        }
+        try FileManager.default.removeItem(at: script)
+        let deadline = Date().addingTimeInterval(2)
+        while signInWatches[.claude] != nil, Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+        }
+        precondition(signInWatches[.claude] == nil, "The finished login was never noticed")
+        let after = panelModel.cards.first { $0.provider == .claude }
+        precondition(after?.note?.hasPrefix("Showing the last reading") == true, "The card kept waiting after the login")
+
+        // Codex gets the same card with its own login.
+        viewModel.useSignInFixture([.codex])
+        viewModel.claudeError = nil
+        viewModel.codexError = APIError.cliSignInExpired(tool: "Codex").errorDescription
+        updatePanel()
+        let codexCard = panelModel.cards.first { $0.provider == .codex }
+        precondition(codexCard?.message == "Codex sign-in expired", "An expired Codex sign-in read wrong")
+        precondition(codexCard?.actionDetail == "codex login", "The Codex login command drifted")
+        precondition(panelModel.cards.first { $0.provider == .claude }?.actionTitle == nil, "Claude kept a stale button")
+
+        // Cursor Agent and the Kimi Code CLI get the same card with their logins.
+        let connected = viewModel.availableProviders
+        viewModel.showCursor = true
+        viewModel.showKimi = true
+        viewModel.useRenderingFixtures(connected.union([.cursor, .kimi]))
+        viewModel.useSignInFixture([.cursor, .kimi])
+        viewModel.codexError = nil
+        updatePanel()
+        let cursorCard = panelModel.cards.first { $0.provider == .cursor }
+        precondition(cursorCard?.message == "Cursor sign-in expired", "An expired Cursor sign-in read wrong")
+        precondition(cursorCard?.actionTitle == "Sign In Again", "An expired Cursor sign-in had no button")
+        precondition(cursorCard?.actionDetail == "cursor-agent login", "The Cursor login command drifted")
+        let kimiCard = panelModel.cards.first { $0.provider == .kimi }
+        precondition(kimiCard?.actionTitle == "Sign In Again", "An expired Kimi Code sign-in had no button")
+        precondition(kimiCard?.actionDetail == "kimi login", "The Kimi Code login command drifted")
+        viewModel.showCursor = false
+        viewModel.showKimi = false
+        viewModel.useRenderingFixtures(connected)
+
+        viewModel.useSignInFixture([])
+
+        // A lapsed access token waits for Claude Code instead of asking for a login.
+        viewModel.useRenewalFixture([.claude])
+        viewModel.claudeError = APIError.cliRenewalPending(tool: "Claude Code").errorDescription
+        updatePanel()
+        let renewing = panelModel.cards.first { $0.provider == .claude }
+        precondition(renewing?.message == "Waiting for Claude Code to renew its sign-in", "The renewal card read wrong")
+        precondition(renewing?.actionTitle == nil, "A lapsed access token offered a new login")
+        for (name, appearance) in [("panel-renewing-light", NSAppearance.Name.aqua)] {
+            let view = NSHostingView(rootView: UsagePanelView(model: panelModel))
+            view.appearance = NSAppearance(named: appearance)
+            view.frame = NSRect(origin: .zero, size: view.fittingSize)
+            view.layoutSubtreeIfNeeded()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+            guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
+            view.cacheDisplay(in: view.bounds, to: bitmap)
+            let url = output.deletingPathExtension().appendingPathExtension("\(name).png")
+            try bitmap.representation(using: .png, properties: [:])?.write(to: url)
+        }
+        viewModel.useRenewalFixture([])
+        viewModel.claudeError = nil
+
+        // Offline: one notice above the cards instead of an error on each.
+        viewModel.useOfflineFixture([.claude, .codex])
+        viewModel.claudeError = "The Internet connection appears to be offline."
+        viewModel.codexError = "The Internet connection appears to be offline."
+        updatePanel()
+        precondition(panelModel.offlineNotice?.title == "No internet connection", "Offline showed no notice")
+        precondition(panelModel.cards.allSatisfy { $0.message == nil && $0.actionTitle == nil },
+                     "Each card repeated the offline error")
+        for (name, appearance) in [("panel-offline-light", NSAppearance.Name.aqua), ("panel-offline-dark", .darkAqua)] {
+            let view = NSHostingView(rootView: UsagePanelView(model: panelModel))
+            view.appearance = NSAppearance(named: appearance)
+            view.frame = NSRect(origin: .zero, size: view.fittingSize)
+            view.layoutSubtreeIfNeeded()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+            guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
+            view.cacheDisplay(in: view.bounds, to: bitmap)
+            let url = output.deletingPathExtension().appendingPathExtension("\(name).png")
+            try bitmap.representation(using: .png, properties: [:])?.write(to: url)
+        }
+        viewModel.useOfflineFixture([])
+        viewModel.claudeError = nil
+        viewModel.codexError = nil
+        updatePanel()
+        precondition(panelModel.offlineNotice == nil, "The offline notice outlived the outage")
+        isPanelOpen = false
+
+        // Either click opens the panel and leaves the bar on its provider.
+        let shown = currentProvider
+        statusBarClicked(isRightClick: true)
+        precondition(currentProvider == shown, "A right click switched providers")
+        precondition(panel.isVisible, "A right click didn't open the panel")
+        statusBarClicked(isRightClick: true)
+        precondition(!panel.isVisible, "A second right click didn't close the panel")
+        statusBarClicked(isRightClick: false)
+        precondition(panel.isVisible, "A left click didn't open the panel")
+        statusBarClicked(isRightClick: false)
+        precondition(!panel.isVisible, "A second left click didn't close the panel")
+        precondition(currentProvider == shown, "A click switched providers")
         isPanelOpen = false
     }
 }

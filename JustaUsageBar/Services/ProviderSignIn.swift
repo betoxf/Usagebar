@@ -60,28 +60,32 @@ nonisolated enum ProviderSignIn: Equatable {
     }
 
     /// Opens Terminal on the provider's login. Terminal runs a `.command` file
-    /// without Automation access, and the file holds only that command.
-    func runInTerminal(signingInTo name: String) -> Bool {
-        guard let command else { return false }
+    /// without Automation access, and the file holds only that command. The file
+    /// deletes itself when the login ends, however it ends, so its removal tells
+    /// Usagebar to look for the new sign-in. Each tool gets its own file, so two
+    /// logins never delete each other's. Returns the file, or nil on failure.
+    @discardableResult
+    func runInTerminal(signingInTo name: String) -> URL? {
+        guard let command else { return nil }
         let script = """
         #!/bin/sh
+        trap 'rm -f "$0"' EXIT INT HUP TERM
         clear
         echo "Signing in to \(name) for Usagebar."
         echo
         \(command)
         echo
         echo "You can close this window and go back to Usagebar."
-        rm -f "$0"
 
         """
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("Usagebar Sign In.command")
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("Usagebar Sign In (\(name)).command")
         do {
             try script.write(to: url, atomically: true, encoding: .utf8)
             try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: url.path)
         } catch {
-            return false
+            return nil
         }
-        return NSWorkspace.shared.open(url)
+        return NSWorkspace.shared.open(url) ? url : nil
     }
 
     private static func login(

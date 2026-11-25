@@ -29,6 +29,11 @@ final class ClaudeOAuthService {
         var scopes: [String]
         var subscriptionType: String?
         var rateLimitTier: String?
+        /// Whether Claude Code holds a refresh token, and when it stops working.
+        /// The access token lasts hours; the sign-in itself lasts weeks. Nil
+        /// when only Usagebar's mirror was read, so nothing is known.
+        var canRenew: Bool?
+        var signInEndsAt: Date?
 
         /// Claude's plans are now Max and Ultra, but Claude Code still stores both
         /// as `max`, with the old `default_claude_max_5x` or `_20x` tier. A Team
@@ -88,6 +93,11 @@ final class ClaudeOAuthService {
             best.subscriptionType = plan.subscriptionType
             best.rateLimitTier = plan.rateLimitTier
         }
+        // The mirror never keeps the refresh token, so take its details from Claude Code's copy.
+        if let cli = candidates.first(where: { $0.canRenew == true }) ?? candidates.first(where: { $0.canRenew != nil }) {
+            best.canRenew = cli.canRenew
+            best.signInEndsAt = cli.signInEndsAt
+        }
 
         // Mirror the freshest so later loads stay cheap and prompt-free.
         cache(credentials: best, persist: true)
@@ -118,13 +128,16 @@ final class ClaudeOAuthService {
             expiresAt = Date(timeIntervalSince1970: expiresMs / 1000.0)
         }
         let scopes = oauth["scopes"] as? [String] ?? []
+        let signInEndsAt = (oauth["refreshTokenExpiresAt"] as? Double).map { Date(timeIntervalSince1970: $0 / 1000.0) }
 
         return OAuthCredentials(
             accessToken: accessToken,
             expiresAt: expiresAt,
             scopes: scopes,
             subscriptionType: oauth["subscriptionType"] as? String,
-            rateLimitTier: oauth["rateLimitTier"] as? String
+            rateLimitTier: oauth["rateLimitTier"] as? String,
+            canRenew: (oauth["refreshToken"] as? String).map { !$0.isEmpty } ?? false,
+            signInEndsAt: signInEndsAt
         )
     }
 
@@ -273,8 +286,9 @@ final class ClaudeOAuthService {
         // here would leave Claude Code holding a dead refresh token and sign it
         // out, so an expired token waits for Claude Code to renew it.
         if isExpired(creds) {
-            guard let reloaded = loadCredentials(forceReload: true), !isExpired(reloaded) else {
-                throw APIError.cliSignInExpired(tool: "Claude Code")
+            let reloaded = loadCredentials(forceReload: true)
+            guard let reloaded, !isExpired(reloaded) else {
+                throw expiredError(reloaded ?? creds)
             }
             creds = reloaded
         }
@@ -306,17 +320,31 @@ final class ClaudeOAuthService {
             // Usagebar's mirror may hold an older token than Claude Code's own
             // copy, so drop it and look again once before giving up.
             clearPersistedCredentials()
-            if allowRediscovery, let reloaded = loadCredentials(forceReload: true),
+            let reloaded = loadCredentials(forceReload: true)
+            if allowRediscovery, let reloaded,
                reloaded.accessToken != creds.accessToken, !isExpired(reloaded) {
                 return try await fetchUsage(allowRediscovery: false)
             }
-            if Self.isExpiredOAuthResponse(data) || isExpired(creds) {
+            if isExpired(creds) {
+                throw expiredError(reloaded ?? creds)
+            }
+            if Self.isExpiredOAuthResponse(data) {
                 throw APIError.cliSignInExpired(tool: "Claude Code")
             }
             throw httpResponse.statusCode == 400 ? APIError.unknown(httpResponse.statusCode) : APIError.unauthorized
         default:
             throw APIError.unknown(httpResponse.statusCode)
         }
+    }
+
+    /// An expired access token isn't an expired sign-in. Claude Code renews it
+    /// with its refresh token the next time it runs, so a login is offered only
+    /// when Claude Code's own copy shows the sign-in itself is gone.
+    private func expiredError(_ creds: OAuthCredentials) -> APIError {
+        if creds.canRenew == false || creds.signInEndsAt.map({ $0 <= Date() }) == true {
+            return .cliSignInExpired(tool: "Claude Code")
+        }
+        return .cliRenewalPending(tool: "Claude Code")
     }
 
     private func cache(credentials: OAuthCredentials, persist: Bool = false) {

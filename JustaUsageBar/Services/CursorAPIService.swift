@@ -167,14 +167,18 @@ final class CursorAPIService {
     /// Agent's plain copy in the Keychain comes next. `/usr/bin/security`
     /// created that item, so `KeychainTool` reads it without a dialog.
     private func readAccessToken() -> (jwt: String, claims: [String: Any])? {
-        if let jwt = readStateValue(key: "cursorAuth/accessToken"), let claims = decodeJWTClaims(jwt) {
-            return (jwt, claims)
-        }
+        let app = readStateValue(key: "cursorAuth/accessToken").flatMap { jwt in decodeJWTClaims(jwt).map { (jwt, $0) } }
+        // An expired app copy mustn't hide the one `cursor-agent login` just renewed.
+        if let app, !Self.hasExpired(app.1) { return app }
         if let jwt = keychain.password(service: "cursor-access-token", account: "cursor-user"),
            let claims = decodeJWTClaims(jwt) {
             return (jwt, claims)
         }
-        return nil
+        return app
+    }
+
+    nonisolated private static func hasExpired(_ claims: [String: Any]) -> Bool {
+        (claims["exp"] as? Double).map { Date(timeIntervalSince1970: $0) <= Date() } ?? false
     }
 
     /// Reads a single value from the VS Code-style SQLite key/value store,
@@ -243,6 +247,11 @@ final class CursorAPIService {
         }
         guard let token else {
             throw APIError.noCredentials
+        }
+        // Still expired after a fresh read. Cursor and Cursor Agent renew it
+        // themselves when they next run, and a request would just be rejected.
+        if let expiresAt = token.expiresAt, expiresAt <= Date() {
+            throw APIError.cliRenewalPending(tool: "Cursor")
         }
 
         guard let url = URL(string: usageSummaryEndpoint) else {

@@ -580,6 +580,31 @@ extension AppDelegate {
     }
 }
 
+/// A CLI that answers without renewing (an unavailable command, a failed
+/// request) must not hold the long cooldown; only a fresh reread does.
+@MainActor func verifyCLIRenewalCooldowns() {
+    let done = DispatchSemaphore(value: 0)
+    Task.detached {
+        let renewal = CLIRenewal.codex
+        let start = Date()
+        await renewal.setAsk { true }
+        var reread = 0
+        var fresh = await renewal.renew(now: start) { reread += 1; return false }
+        precondition(!fresh && reread == 1, "A CLI that answered without renewing counted as renewed")
+        fresh = await renewal.renew(now: start.addingTimeInterval(5)) { reread += 1; return true }
+        precondition(!fresh && reread == 1, "A failed renewal was retried inside its cooldown")
+        fresh = await renewal.renew(now: start.addingTimeInterval(CLIRenewal.failedCooldown + 1)) { reread += 1; return true }
+        precondition(fresh && reread == 2, "A renewal after the short cooldown didn't run")
+        fresh = await renewal.renew(now: start.addingTimeInterval(CLIRenewal.failedCooldown + 60)) { reread += 1; return true }
+        precondition(!fresh && reread == 2, "A renewed sign-in was asked again within five minutes")
+        await renewal.setAsk { false }
+        fresh = await renewal.renew(now: start.addingTimeInterval(CLIRenewal.renewedCooldown + 1)) { reread += 1; return true }
+        precondition(!fresh && reread == 2, "Credentials were reread after the CLI failed")
+        done.signal()
+    }
+    done.wait()
+}
+
 @main
 struct StatusRenderingTests {
     @MainActor static func main() throws {
@@ -595,6 +620,7 @@ struct StatusRenderingTests {
         let model = UsageViewModel(startAutomatically: false)
         let output = ProcessInfo.processInfo.environment["USAGEBAR_RENDER_OUTPUT"].map { URL(fileURLWithPath: $0) }
         try AppDelegate(viewModel: model).verifyRendering(output: output)
-        print("PASS: DeepSeek credentials and balances, Qwen usage parsing, Cursor outages, plan names, setup status and model, setup/Claude/Codex menus, closed-menu reuse, status image caching, light/dark rendering, Claude without a 5-hour window, focus following")
+        verifyCLIRenewalCooldowns()
+        print("PASS: CLI renewal cooldowns, DeepSeek credentials and balances, Qwen usage parsing, Cursor outages, plan names, setup status and model, setup/Claude/Codex menus, closed-menu reuse, status image caching, light/dark rendering, Claude without a 5-hour window, focus following")
     }
 }

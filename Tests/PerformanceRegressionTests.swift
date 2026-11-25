@@ -18,6 +18,7 @@ struct PerformanceRegressionTests {
         try await testExpiredSignIn()
         try await testOffline()
         try await testRenewalPending()
+        try await testCodexRenewalRequests()
         testTerminalCommands()
         try await testTerminalSessionScan()
         await testProviderHTTP()
@@ -239,10 +240,41 @@ struct PerformanceRegressionTests {
         await model.refresh(); await model.refresh()
         let retry = model.refreshStates[.claude]?.retryAt ?? .distantFuture
         check(retry <= Date().addingTimeInterval(601), "Waiting for a renewal backed off past the normal pace")
+        let asked = await ClaudeOAuthService.shared.renewalRequests
+        await model.refresh()
+        check(await ClaudeOAuthService.shared.renewalRequests == asked, "An automatic refresh asked Claude Code to renew its sign-in")
+        await model.rediscoverCredentialsAndRefresh()
+        check(await ClaudeOAuthService.shared.renewalRequests == asked + 1, "Refresh didn't ask Claude Code to renew its sign-in")
         await FakeProviders.clearError(for: .claude)
         await model.retryAfterSignIn(.claude)
+        check(await ClaudeOAuthService.shared.renewalRequests == asked + 2, "Opening the panel didn't ask Claude Code to renew its sign-in")
         try await eventually { !model.isLoading && model.claudeError == nil }
         check(model.renewalPending.isEmpty, "The renewed token kept the waiting card")
+    }
+
+    @MainActor static func testCodexRenewalRequests() async throws {
+        await FakeProviders.reset()
+        await FakeProviders.setAvailable([.codex])
+        let model = UsageViewModel(startAutomatically: false)
+        defer { model.stopAutoRefresh() }
+        model.showClaude = false
+        model.showCodex = true
+        model.showCursor = false
+        model.showKimi = false
+        model.showZai = false
+        let before = await CodexAPIService.shared.renewalRequests
+        await model.refresh()
+        check(await CodexAPIService.shared.renewalRequests == before, "A healthy Codex sign-in asked Codex to renew it")
+        await FakeProviders.setError(.cliRenewalPending(tool: "Codex"), for: .codex)
+        await model.refresh()
+        check(model.renewalPending == [.codex], "An expired Codex token wasn't marked as waiting for Codex")
+        check(await CodexAPIService.shared.renewalRequests == before, "The refresh that found the expired token asked Codex before anyone looked")
+        await model.refresh()
+        check(await CodexAPIService.shared.renewalRequests == before, "An automatic refresh asked Codex to renew its sign-in")
+        await model.rediscoverCredentialsAndRefresh()
+        check(await CodexAPIService.shared.renewalRequests == before + 1, "Refresh didn't ask Codex to renew its sign-in")
+        await model.retryAfterSignIn(.codex)
+        check(await CodexAPIService.shared.renewalRequests == before + 2, "Opening the panel didn't ask Codex to renew its sign-in")
     }
 
     @MainActor static func testOffline() async throws {

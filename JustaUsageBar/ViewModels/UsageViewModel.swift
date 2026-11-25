@@ -28,7 +28,8 @@ final class UsageViewModel: ObservableObject {
     @Published private(set) var needsSignIn: Set<DisplayProvider> = []
 
     /// CLIs whose short-lived access token lapsed while their sign-in still
-    /// works. The CLI renews it the next time it runs; no login is needed.
+    /// works. The CLI renews it the next time it runs, or when Usagebar asks it
+    /// to on Refresh or when the panel opens; no login is needed.
     @Published private(set) var renewalPending: Set<DisplayProvider> = []
 
     /// Providers whose last request couldn't reach the internet. While any are
@@ -251,11 +252,16 @@ final class UsageViewModel: ObservableObject {
 
     /// Picks up a CLI sign-in renewed outside Usagebar. Drops the failure delay
     /// for this provider alone, keeps any server cooldown, and rereads its CLI's
-    /// credentials. An expired Claude or Cursor token is checked locally, with no request.
+    /// credentials, asking Claude Code or Codex to renew an expired token first.
+    /// Usagebar sends no request with an expired token.
     func retryAfterSignIn(_ provider: DisplayProvider) async {
         switch provider {
-        case .claude: await ClaudeOAuthService.shared.clearCache()
-        case .codex: await CodexAPIService.shared.clearCache()
+        case .claude:
+            await ClaudeOAuthService.shared.clearCache()
+            await ClaudeOAuthService.shared.requestCLIRenewal()
+        case .codex:
+            await CodexAPIService.shared.clearCache()
+            await CodexAPIService.shared.requestCLIRenewal()
         case .cursor: await CursorAPIService.shared.clearCache()
         case .kimi: await KimiAPIService.shared.clearCache()
         default: break
@@ -320,8 +326,11 @@ final class UsageViewModel: ObservableObject {
         }
     }
 
+    /// The Refresh button. It also lets Codex be asked to renew an expired sign-in.
     func rediscoverCredentialsAndRefresh() async {
         if let credentialChangeTask { await credentialChangeTask.value }
+        if renewalPending.contains(.claude) { await ClaudeOAuthService.shared.requestCLIRenewal() }
+        if renewalPending.contains(.codex) { await CodexAPIService.shared.requestCLIRenewal() }
         await requestRefresh(manual: true, rediscover: true)
     }
 

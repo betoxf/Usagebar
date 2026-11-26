@@ -580,6 +580,13 @@ extension AppDelegate {
     }
 }
 
+nonisolated final class AskCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    func add() { lock.withLock { count += 1 } }
+    func count(is expected: Int) -> Bool { lock.withLock { count == expected } }
+}
+
 /// A CLI that answers without renewing (an unavailable command, a failed
 /// request) must not hold the long cooldown; only a fresh reread does.
 @MainActor func verifyCLIRenewalCooldowns() {
@@ -600,6 +607,41 @@ extension AppDelegate {
         await renewal.setAsk { false }
         fresh = await renewal.renew(now: start.addingTimeInterval(CLIRenewal.renewedCooldown + 1)) { reread += 1; return true }
         precondition(!fresh && reread == 2, "Credentials were reread after the CLI failed")
+
+        // Refreshes ask on their own, so failures back off, up to half an hour,
+        // unless someone is looking.
+        let claude = CLIRenewal.claude
+        let asks = AskCounter()
+        await claude.setAsk { asks.add(); return false }
+        let base = Date()
+        _ = await claude.renew(now: base) { true }
+        _ = await claude.renew(now: base.addingTimeInterval(21)) { true }
+        precondition(asks.count(is: 2), "A failed renewal wasn't tried again after 20 seconds")
+        _ = await claude.renew(now: base.addingTimeInterval(30)) { true }
+        precondition(asks.count(is: 2), "A second failure didn't double the backoff")
+        _ = await claude.renew(now: base.addingTimeInterval(30), asked: true) { true }
+        precondition(asks.count(is: 3), "Someone looking waited out the timer's backoff")
+        _ = await claude.renew(now: base.addingTimeInterval(79)) { true }
+        precondition(asks.count(is: 3), "A third failure didn't double the backoff again")
+        for _ in 0..<8 { _ = await claude.renew(now: base.addingTimeInterval(100_000), asked: true) { true } }
+        _ = await claude.renew(now: base.addingTimeInterval(CLIRenewal.longestFailedCooldown - 1)) { true }
+        precondition(asks.count(is: 11), "The backoff ended before half an hour")
+        _ = await claude.renew(now: base.addingTimeInterval(CLIRenewal.longestFailedCooldown + 1)) { true }
+        precondition(asks.count(is: 12), "The backoff grew past half an hour")
+
+        // Two refreshes at once share one run of the CLI.
+        await claude.setAsk {
+            asks.add()
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            return true
+        }
+        let later = base.addingTimeInterval(100_000)
+        async let first = claude.renew(now: later, asked: true) { true }
+        async let second = claude.renew(now: later, asked: true) { true }
+        let both = await (first, second)
+        precondition(both.0 && both.1 && (asks.count(is: 13)), "Two refreshes ran the CLI twice or one didn't see the renewal")
+        fresh = await claude.renew(now: Date(), asked: true) { true }
+        precondition(!fresh && (asks.count(is: 13)), "A renewed sign-in was asked again right away")
         done.signal()
     }
     done.wait()

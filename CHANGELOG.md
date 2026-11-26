@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Keep Claude Code and Codex readings current without opening the panel. Usagebar now asks Claude Code to renew its sign-in a few minutes before the access token expires, and asks either tool as soon as a refresh finds the token expired, so the card no longer says it's waiting for a renewal until you click. The waiting note appears only when a renewal fails, and Usagebar backs off, up to half an hour, while it keeps failing.
+
 ## [1.15.0](https://github.com/betoxf/Usagebar/releases/tag/v1.15.0) — 2026-11-25
 
 - Stop asking you to sign in to Claude Code or Codex again after a few idle hours. Their access tokens expire every few hours, but their sign-ins last weeks. When only the token has expired, the card keeps your last reading and says it's waiting for the tool to renew it, with no login button. **Sign In Again** appears only when the sign-in itself has ended, and it runs `claude auth login` or `codex login` in Terminal. Cursor and Kimi Code get the same button.

@@ -28,8 +28,8 @@ final class UsageViewModel: ObservableObject {
     @Published private(set) var needsSignIn: Set<DisplayProvider> = []
 
     /// CLIs whose short-lived access token lapsed while their sign-in still
-    /// works. The CLI renews it the next time it runs, or when Usagebar asks it
-    /// to on Refresh or when the panel opens; no login is needed.
+    /// works, and that couldn't renew it when asked. Usagebar keeps asking
+    /// Claude Code and Codex as it refreshes; no login is needed.
     @Published private(set) var renewalPending: Set<DisplayProvider> = []
 
     /// Providers whose last request couldn't reach the internet. While any are
@@ -252,7 +252,8 @@ final class UsageViewModel: ObservableObject {
 
     /// Picks up a CLI sign-in renewed outside Usagebar. Drops the failure delay
     /// for this provider alone, keeps any server cooldown, and rereads its CLI's
-    /// credentials, asking Claude Code or Codex to renew an expired token first.
+    /// credentials, asking Claude Code or Codex to renew an expired token first
+    /// without waiting out a failed renewal's backoff.
     /// Usagebar sends no request with an expired token.
     func retryAfterSignIn(_ provider: DisplayProvider) async {
         switch provider {
@@ -326,7 +327,8 @@ final class UsageViewModel: ObservableObject {
         }
     }
 
-    /// The Refresh button. It also lets Codex be asked to renew an expired sign-in.
+    /// The Refresh button. A failed Claude Code or Codex renewal is tried again
+    /// right away rather than after the timer's backoff.
     func rediscoverCredentialsAndRefresh() async {
         if let credentialChangeTask { await credentialChangeTask.value }
         if renewalPending.contains(.claude) { await ClaudeOAuthService.shared.requestCLIRenewal() }
@@ -513,8 +515,8 @@ final class UsageViewModel: ObservableObject {
             }
             if case APIError.cliRenewalPending = error {
                 renewalPending.insert(provider)
-                // Only a local credential read until the CLI renews, so check at
-                // the normal pace instead of backing off for up to 30 minutes.
+                // A local credential read, plus a CLI renewal that backs off on
+                // its own, so check at the normal pace instead of backing off here.
                 refreshStates[provider, default: .init()].retryAt = max(
                     Date().addingTimeInterval(effectiveRefreshInterval),
                     refreshStates[provider]?.serverRetryAt ?? .distantPast

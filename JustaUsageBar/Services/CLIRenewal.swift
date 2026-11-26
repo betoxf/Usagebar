@@ -7,7 +7,9 @@
 //  never redeems it. Instead it runs the CLI for something that needs a valid
 //  token and makes no model call; the CLI renews the token itself before it
 //  answers and saves it where it always does, and Usagebar then reads it as
-//  usual. Nothing opens a terminal or a window.
+//  usual. Nothing opens a terminal or a window. Refreshes ask on their own
+//  once a token has expired (Claude Code's also just before), so nobody has
+//  to open the panel for it.
 //
 //  - Claude Code: `claude -p /usage`, which reads the plan's usage with
 //    `refreshOAuth` on, in print mode, so no folder-trust prompt is shown.
@@ -21,9 +23,13 @@ import Foundation
     static let claude = CLIRenewal { await CLIRenewal.askClaudeCode() }
     static let codex = CLIRenewal { await CLIRenewal.askCodexAppServer() }
 
-    /// After a renewal, the token lasts hours; after a failure, try again soon.
+    /// After a renewal, the token lasts hours. After a failure, try again in
+    /// 20 seconds when someone is looking; on their own, refreshes back off,
+    /// doubling up to half an hour, so a CLI that can't renew isn't run on
+    /// every tick.
     static let renewedCooldown: TimeInterval = 300
     static let failedCooldown: TimeInterval = 20
+    static let longestFailedCooldown: TimeInterval = 1800
 
     private var ask: @Sendable () async -> Bool
 
@@ -31,7 +37,10 @@ import Foundation
     func setAsk(_ ask: @escaping @Sendable () async -> Bool) {
         self.ask = ask
     }
-    private var nextAttempt = Date.distantPast
+
+    private var finishedAt = Date.distantPast
+    private var failures = 0
+    private var running: Task<Bool, Never>?
 
     private init(ask: @escaping @Sendable () async -> Bool) {
         self.ask = ask
@@ -39,14 +48,32 @@ import Foundation
 
     /// Asks the CLI, then `renewed` rereads its credentials and says whether the
     /// token is fresh now. A CLI's answer alone proves nothing: one that can't
-    /// run the command still answers. Returns false at once while an attempt
-    /// runs or a cooldown holds.
-    func renew(now: Date = Date(), renewed: () -> Bool) async -> Bool {
-        guard now >= nextAttempt else { return false }
-        nextAttempt = .distantFuture
-        let fresh = await ask() && renewed()
-        nextAttempt = Date().addingTimeInterval(fresh ? Self.renewedCooldown : Self.failedCooldown)
+    /// run the command still answers. While another refresh is asking, this
+    /// waits for that answer and rereads. Returns false at once while a
+    /// cooldown holds; `asked` (someone opened the panel or clicked Refresh)
+    /// keeps a failure's cooldown short.
+    func renew(now: Date = Date(), asked: Bool = false, renewed: () -> Bool) async -> Bool {
+        if let running {
+            _ = await running.value
+            return renewed()
+        }
+        guard now >= nextAttempt(asked: asked) else { return false }
+        let attempt = Task { [ask] in await ask() }
+        running = attempt
+        let fresh = await attempt.value && renewed()
+        running = nil
+        finishedAt = Date()
+        failures = fresh ? 0 : failures + 1
         return fresh
+    }
+
+    private func nextAttempt(asked: Bool) -> Date {
+        guard failures > 0 else {
+            return finishedAt == .distantPast ? .distantPast : finishedAt.addingTimeInterval(Self.renewedCooldown)
+        }
+        let backoff = asked ? Self.failedCooldown
+            : min(Self.failedCooldown * pow(2, Double(failures - 1)), Self.longestFailedCooldown)
+        return finishedAt.addingTimeInterval(backoff)
     }
 
     // MARK: - Claude Code

@@ -109,6 +109,10 @@ final class ClaudeOAuthService {
         creds.max { ($0.expiresAt ?? .distantPast) < ($1.expiresAt ?? .distantPast) }
     }
 
+    /// Claude Code treats a token in its last five minutes as expired and
+    /// renews it, so asking a little inside that window gets a fresh one.
+    private static let renewalLead: TimeInterval = 240
+
     private func isExpired(_ creds: OAuthCredentials, skew: TimeInterval = 60) -> Bool {
         guard let expiresAt = creds.expiresAt else { return false }
         return expiresAt <= Date().addingTimeInterval(skew)
@@ -150,9 +154,9 @@ final class ClaudeOAuthService {
         lastCredentialCheck = nil
     }
 
-    /// Lets the next fetch ask Claude Code to renew an expired sign-in. Only a
-    /// person's Refresh or opening the panel asks, never the timer, so a request
-    /// no fetch took right away (a server cooldown, sleep) lapses.
+    /// Tells the next fetch that someone is looking (Refresh or the panel), so
+    /// a failed renewal is tried again after 20 seconds rather than the timer's
+    /// backoff. A request no fetch took right away (a server cooldown, sleep) lapses.
     private var cliRenewalRequestedAt: Date?
 
     func requestCLIRenewal() {
@@ -298,12 +302,14 @@ final class ClaudeOAuthService {
 
         // Claude Code owns this sign-in and rotates its refresh token. Refreshing
         // here would leave Claude Code holding a dead refresh token and sign it
-        // out, so an expired token waits for Claude Code to renew it.
-        // When someone is looking (Refresh or the panel), ask Claude Code to renew it now.
+        // out, so Claude Code is asked to renew it instead: once it has expired,
+        // and also in its last five minutes, when Claude Code renews it too, so
+        // the reading never goes stale.
+        let asked = takeCLIRenewalRequest()
         if isExpired(creds) {
             var reloaded = loadCredentials(forceReload: true)
-            if takeCLIRenewalRequest(), case .cliRenewalPending = expiredError(reloaded ?? creds) {
-                _ = await CLIRenewal.claude.renew {
+            if let current = reloaded, isExpired(current), case .cliRenewalPending = expiredError(current) {
+                _ = await CLIRenewal.claude.renew(asked: asked) {
                     reloaded = loadCredentials(forceReload: true)
                     return reloaded.map { !isExpired($0) } ?? false
                 }
@@ -312,8 +318,16 @@ final class ClaudeOAuthService {
                 throw expiredError(reloaded ?? creds)
             }
             creds = reloaded
+        } else if let expiresAt = creds.expiresAt, expiresAt <= Date().addingTimeInterval(Self.renewalLead),
+                  case .cliRenewalPending = expiredError(creds) {
+            // Still valid, so a failure keeps using it; only a later expiry counts.
+            _ = await CLIRenewal.claude.renew(asked: asked) {
+                guard let reloaded = loadCredentials(forceReload: true),
+                      let renewedUntil = reloaded.expiresAt, renewedUntil > expiresAt else { return false }
+                creds = reloaded
+                return true
+            }
         }
-        _ = takeCLIRenewalRequest()
 
         guard let url = URL(string: usageEndpoint) else {
             throw APIError.invalidURL

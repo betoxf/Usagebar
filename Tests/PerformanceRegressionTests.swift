@@ -242,7 +242,7 @@ struct PerformanceRegressionTests {
         check(retry <= Date().addingTimeInterval(601), "Waiting for a renewal backed off past the normal pace")
         let asked = await ClaudeOAuthService.shared.renewalRequests
         await model.refresh()
-        check(await ClaudeOAuthService.shared.renewalRequests == asked, "An automatic refresh asked Claude Code to renew its sign-in")
+        check(await ClaudeOAuthService.shared.renewalRequests == asked, "An automatic refresh counted as someone looking")
         await model.rediscoverCredentialsAndRefresh()
         check(await ClaudeOAuthService.shared.renewalRequests == asked + 1, "Refresh didn't ask Claude Code to renew its sign-in")
         await FakeProviders.clearError(for: .claude)
@@ -264,13 +264,13 @@ struct PerformanceRegressionTests {
         model.showZai = false
         let before = await CodexAPIService.shared.renewalRequests
         await model.refresh()
-        check(await CodexAPIService.shared.renewalRequests == before, "A healthy Codex sign-in asked Codex to renew it")
+        check(await CodexAPIService.shared.renewalRequests == before, "A healthy Codex sign-in counted as someone looking")
         await FakeProviders.setError(.cliRenewalPending(tool: "Codex"), for: .codex)
         await model.refresh()
         check(model.renewalPending == [.codex], "An expired Codex token wasn't marked as waiting for Codex")
-        check(await CodexAPIService.shared.renewalRequests == before, "The refresh that found the expired token asked Codex before anyone looked")
+        check(await CodexAPIService.shared.renewalRequests == before, "The refresh that found the expired token counted as someone looking")
         await model.refresh()
-        check(await CodexAPIService.shared.renewalRequests == before, "An automatic refresh asked Codex to renew its sign-in")
+        check(await CodexAPIService.shared.renewalRequests == before, "An automatic refresh counted as someone looking")
         await model.rediscoverCredentialsAndRefresh()
         check(await CodexAPIService.shared.renewalRequests == before + 1, "Refresh didn't ask Codex to renew its sign-in")
         await model.retryAfterSignIn(.codex)

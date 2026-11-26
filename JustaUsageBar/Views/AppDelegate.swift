@@ -669,8 +669,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
         updatePanel()
         panel.show(below: button)
         // A CLI may have renewed its sign-in since the last try. Claude Code and
-        // Codex are also asked to renew an expired one now that someone is looking;
-        // Usagebar itself sends nothing with an expired token.
+        // Codex are asked again now, without waiting out a failed renewal's
+        // backoff; Usagebar itself sends nothing with an expired token.
         for provider in viewModel.needsSignIn.union(viewModel.renewalPending).intersection([.claude, .codex, .cursor]) {
             Task { await viewModel.retryAfterSignIn(provider) }
         }
@@ -760,7 +760,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                     cards.append(UsagePanelCard(
                         provider: .claude, detail: detail, rows: rows,
                         message: "Waiting for Claude Code to renew its sign-in",
-                        note: "Usagebar asks Claude Code to renew it when you open this panel or click Refresh. Showing the last reading."
+                        note: "Claude Code couldn't renew it just now. Usagebar keeps asking, and tries again when you open this panel or click Refresh. Showing the last reading."
                     ))
                 } else if viewModel.needsSignIn.contains(.claude) {
                     let isBrowser = viewModel.claudeAuthSource == .webSession
@@ -799,7 +799,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSWind
                     cards.append(UsagePanelCard(
                         provider: .codex, detail: detail, rows: rows,
                         message: "Waiting for Codex to renew its sign-in",
-                        note: "Usagebar asks Codex to renew it when you open this panel or click Refresh. Showing the last reading."
+                        note: "Codex couldn't renew it just now. Usagebar keeps asking, and tries again when you open this panel or click Refresh. Showing the last reading."
                     ))
                 } else if viewModel.needsSignIn.contains(.codex) {
                     cards.append(signInCard(.codex, detail: detail, rows: rows, tool: "Codex", command: "codex login"))

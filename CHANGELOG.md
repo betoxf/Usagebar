@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## [1.15.1](https://github.com/betoxf/Usagebar/releases/tag/v1.15.1) — 2026-11-26
 
 - Keep Claude Code and Codex readings current without opening the panel. Usagebar now asks Claude Code to renew its sign-in a few minutes before the access token expires, and asks either tool as soon as a refresh finds the token expired, so the card no longer says it's waiting for a renewal until you click. The waiting note appears only when a renewal fails, and Usagebar backs off, up to half an hour, while it keeps failing.
 
